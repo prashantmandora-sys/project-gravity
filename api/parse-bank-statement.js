@@ -22,7 +22,11 @@ module.exports = async (req, res) => {
 odd spacing or line breaks). Read the statement below and return a JSON object with exactly these keys:
 
 {
-  "accountName": string or null (bank/card name or account nickname, if shown),
+  "bankName": string or null (issuing bank, e.g. "HDFC Bank", "ICICI Bank"),
+  "accountName": string or null (account holder name or account nickname, if shown),
+  "accountNumber": string or null (masked/last-4 account or card number as printed, e.g. "XXXX1234"),
+  "accountType": string or null (e.g. "Savings", "Current", "Credit Card"),
+  "closingBalance": number or null (the statement's closing/current balance, if shown),
   "statementPeriodStart": string or null (YYYY-MM-DD),
   "statementPeriodEnd": string or null (YYYY-MM-DD),
   "transactions": [
@@ -37,6 +41,7 @@ Rules:
   interest received).
 - Keep descriptions as they appear (merchant/narration text), trimmed of extra whitespace.
 - If a transaction's date is ambiguous, use the statement's evident date format consistently.
+- Do not fabricate account details that aren't present in the text — use null.
 
 STATEMENT TEXT:
 """

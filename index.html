@@ -143,6 +143,12 @@
     <section class="summary-grid" id="cashflowSummaryGrid"></section>
 
     <section class="panel">
+      <h2>Accounts</h2>
+      <p class="hint">Auto-detected from your uploaded bank/card statements &mdash; name, account number, type, and balance update with each new upload.</p>
+      <div id="accountsGrid" class="accounts-grid"></div>
+    </section>
+
+    <section class="panel">
       <h2>This Month's Known EMI Outflows</h2>
       <p class="hint">Pulled live from your active debts in Debt Management &mdash; nothing to maintain twice.</p>
       <div class="table-wrap">
@@ -204,6 +210,10 @@
         <h3>Extracted transactions &mdash; review, edit, and categorize before saving</h3>
         <div class="simulator-controls">
           <label>Target Month <input type="month" id="btMonth" /></label>
+          <label>Bank Name <input type="text" id="btBankName" /></label>
+          <label>Account Number <input type="text" id="btAccountNumber" placeholder="e.g. XXXX1234" /></label>
+          <label>Account Type <input type="text" id="btAccountType" placeholder="Savings, Credit Card..." /></label>
+          <label>Closing Balance (&#8377;) <input type="number" id="btClosingBalance" step="1" /></label>
         </div>
         <div id="btSummary" class="hint"></div>
         <div class="table-wrap">

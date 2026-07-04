@@ -84,4 +84,6 @@ const CASHFLOW_SEED = {
   ].map((r, i) => ({ id: `rec-seed-${i + 1}`, ...r })),
   monthlyLogs: [],
   bankStatements: [],
+  categoryMappings: {},
+  bankAccounts: [],
 };

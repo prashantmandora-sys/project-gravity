@@ -3,9 +3,9 @@
 A static personal finance portal with three views, seeded from `My Finances.xlsx`.
 
 - **Debt Management**: debt list, payoff simulator (snowball/avalanche), PDF loan statement upload with AI extraction.
-- **Cashflow Management**: monthly income/expense logging, 50/20/30-style budget rule vs actual, recurring expense templates, EMI outflows pulled live from Debt Management, net cashflow trend, and bank/card statement PDF upload that extracts transactions and merges them into a month's log.
+- **Cashflow Management**: monthly income/expense logging, 50/20/30-style budget rule vs actual, recurring expense templates, EMI outflows pulled live from Debt Management, net cashflow trend, an Accounts dashboard (bank logo badge, account name/number/type/balance, auto-detected from statements), and bank/card statement PDF upload that extracts transactions and merges them into a month's log. Categorization **learns from your corrections**: every category (and debit/credit type) you confirm or fix during review is remembered by a normalized merchant key, so the next statement auto-suggests it instead of falling back to a generic default.
 - **Investment Management**: holdings tracker (invested vs current value, gain/loss), folio/policy number + payout/maturity date tracking, PDF investment statement upload with AI extraction, per-financial-year Tax Benefit panel (80C/80D/80CCD(1B) vs Old/New regime), allocation chart, AI portfolio insights.
-- A **Net Worth** strip (Investments − Pending Debt) is always visible in the header across all views.
+- A **Net Worth** strip (Investments + Cash − Pending Debt − Credit Card Dues) is always visible in the header across all views.
 
 - **Frontend**: plain HTML/CSS/JS, no build step, no framework. Charts via Chart.js (CDN). PDF text extraction via PDF.js (CDN).
 - **Data**: seeded once from `data-seed.js` into `localStorage` (single object: `{ debts, cashflow, investments }`); edit/add/delete in the app from then on. Use Export/Import to back up or move data between browsers/devices.

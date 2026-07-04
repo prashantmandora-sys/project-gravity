@@ -227,3 +227,23 @@ tr:hover td { background: #1d2438; }
 #btTransactionTable input[type="date"] { width: 130px; }
 #btTransactionTable input[type="number"] { width: 100px; }
 #btTransactionTable input[type="checkbox"] { width: auto; }
+
+.accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.account-card {
+  display: flex; align-items: center; gap: 12px;
+  background: #0e1420; border: 1px solid var(--panel-border); border-radius: 10px; padding: 14px;
+}
+.account-badge {
+  flex-shrink: 0; width: 44px; height: 44px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 11px; letter-spacing: -0.02em; text-align: center;
+}
+.account-details { min-width: 0; }
+.account-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.account-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.account-balance { font-size: 15px; font-weight: 700; margin-top: 4px; }
+.accounts-empty { color: var(--muted); font-size: 13px; }

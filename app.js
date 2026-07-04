@@ -45,6 +45,8 @@ function loadData() {
   if (!Array.isArray(parsed.cashflow.recurringExpenses)) parsed.cashflow.recurringExpenses = [];
   if (!Array.isArray(parsed.cashflow.monthlyLogs)) parsed.cashflow.monthlyLogs = [];
   if (!Array.isArray(parsed.cashflow.bankStatements)) parsed.cashflow.bankStatements = [];
+  if (!parsed.cashflow.categoryMappings || typeof parsed.cashflow.categoryMappings !== "object") parsed.cashflow.categoryMappings = {};
+  if (!Array.isArray(parsed.cashflow.bankAccounts)) parsed.cashflow.bankAccounts = [];
   parsed.investments = parsed.investments.map(normalizeInvestment);
 
   debts = parsed.debts;
@@ -83,14 +85,17 @@ function renderAll() {
 
 function renderNetWorth() {
   const totalPendingDebt = debts.reduce((s, d) => s + d.pendingAmount, 0);
-  const totalInvested = investments.reduce((s, i) => s + i.investedAmount, 0);
   const totalCurrentValue = investments.reduce((s, i) => s + i.currentValue, 0);
-  const netWorth = totalCurrentValue - totalPendingDebt;
+  const isCreditCard = (acct) => (acct.accountType || "").toLowerCase().includes("credit card");
+  const totalCash = (cashflow.bankAccounts || []).filter((a) => !isCreditCard(a)).reduce((s, a) => s + (a.currentBalance || 0), 0);
+  const totalCardDue = (cashflow.bankAccounts || []).filter(isCreditCard).reduce((s, a) => s + (a.currentBalance || 0), 0);
+  const netWorth = totalCurrentValue + totalCash - totalPendingDebt - totalCardDue;
 
   document.getElementById("networthStrip").innerHTML = `
     <div class="nw-item"><span class="nw-label">Net Worth</span><span class="nw-value ${netWorth >= 0 ? "positive" : "negative"}">${INR(netWorth)}</span></div>
     <div class="nw-item"><span class="nw-label">Investments</span><span class="nw-value">${INR(totalCurrentValue)}</span></div>
-    <div class="nw-item"><span class="nw-label">Pending Debt</span><span class="nw-value">${INR(totalPendingDebt)}</span></div>
+    <div class="nw-item"><span class="nw-label">Cash</span><span class="nw-value">${INR(totalCash)}</span></div>
+    <div class="nw-item"><span class="nw-label">Pending Debt</span><span class="nw-value">${INR(totalPendingDebt + totalCardDue)}</span></div>
   `;
 }
 
@@ -538,11 +543,34 @@ function renderCashflowView() {
   document.getElementById("bSavings").value = cashflow.budgetSplit.savings;
   document.getElementById("bWants").value = cashflow.budgetSplit.wants;
 
+  renderAccountsPanel();
   renderRecurringTable();
   renderBankStatementHistoryTable();
   renderMonthlyLogTable(logs);
   renderBudgetVsActualChart(latest);
   renderCashflowTrendChart(logs);
+}
+
+function renderAccountsPanel() {
+  const grid = document.getElementById("accountsGrid");
+  if (!cashflow.bankAccounts || cashflow.bankAccounts.length === 0) {
+    grid.innerHTML = `<div class="accounts-empty">No accounts yet — upload a bank/card statement below to add one.</div>`;
+    return;
+  }
+  grid.innerHTML = cashflow.bankAccounts
+    .map((a) => {
+      const badge = getBankBadge(a.bankName);
+      const isCreditCard = (a.accountType || "").toLowerCase().includes("credit card");
+      return `<div class="account-card">
+        <div class="account-badge" style="background:${badge.color}">${escapeHtml(badge.initials)}</div>
+        <div class="account-details">
+          <div class="account-name">${escapeHtml(a.bankName || "Account")}</div>
+          <div class="account-meta">${escapeHtml(a.accountType || "-")} &middot; ${escapeHtml(a.accountNumber || "-")}</div>
+          <div class="account-balance ${isCreditCard ? "negative" : "positive"}">${INR(a.currentBalance || 0)}${isCreditCard ? " due" : ""}</div>
+        </div>
+      </div>`;
+    })
+    .join("");
 }
 
 function renderRecurringTable() {
@@ -660,14 +688,80 @@ async function getCashflowAiCommentary() {
 // ---------- Bank / Card Statement Upload ----------
 
 let pendingBankTransactions = [];
-let pendingBankAccountName = "";
+let pendingBankAccountMeta = { bankName: "", accountNumber: "", accountType: "", closingBalance: null };
+
+const KNOWN_BANKS = {
+  hdfc: { initials: "HDFC", color: "#004c8f" },
+  icici: { initials: "ICICI", color: "#b02a30" },
+  "state bank": { initials: "SBI", color: "#22409a" },
+  sbi: { initials: "SBI", color: "#22409a" },
+  axis: { initials: "AXIS", color: "#97144d" },
+  kotak: { initials: "KMB", color: "#ed1c24" },
+  idfc: { initials: "IDFC", color: "#8c1d40" },
+  "yes bank": { initials: "YES", color: "#003087" },
+  pnb: { initials: "PNB", color: "#7a1f2b" },
+  "punjab national": { initials: "PNB", color: "#7a1f2b" },
+  "bank of baroda": { initials: "BOB", color: "#f9a01b" },
+  canara: { initials: "CNRB", color: "#004b8d" },
+  indusind: { initials: "IIB", color: "#8a1538" },
+};
+
+function getBankBadge(bankName) {
+  const lower = (bankName || "").toLowerCase();
+  const key = Object.keys(KNOWN_BANKS).find((k) => lower.includes(k));
+  if (key) return KNOWN_BANKS[key];
+  const initials = (bankName || "?").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 4).toUpperCase() || "?";
+  return { initials, color: "#4f8cff" };
+}
+
+const DESC_KEY_STOPWORDS = new Set([
+  "auto", "debit", "credit", "payment", "bill", "upi", "neft", "imps", "txn", "transaction",
+  "order", "ref", "no", "card", "pos", "atm", "withdrawal", "deposit", "transfer", "the", "to",
+  "from", "dr", "cr", "charges", "fee", "purchase", "for",
+]);
+
+function normalizeDescriptionKey(description) {
+  return (description || "")
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w && w.length > 2 && !DESC_KEY_STOPWORDS.has(w))
+    .slice(0, 3)
+    .join(" ");
+}
 
 function guessCategoryForDescription(description) {
+  const key = normalizeDescriptionKey(description);
+  if (key) {
+    const learnedKeys = Object.keys(cashflow.categoryMappings).sort((a, b) => b.length - a.length);
+    for (const k of learnedKeys) {
+      if (k && (key.includes(k) || k.includes(key))) return cashflow.categoryMappings[k].category;
+    }
+  }
   const desc = (description || "").toLowerCase();
   const match = cashflow.recurringExpenses.find(
     (r) => desc.includes(r.name.toLowerCase()) || r.name.toLowerCase().includes(desc)
   );
   return match ? match.category : "wants";
+}
+
+function guessTypeForDescription(description, fallbackType) {
+  const key = normalizeDescriptionKey(description);
+  if (key) {
+    const learnedKeys = Object.keys(cashflow.categoryMappings).sort((a, b) => b.length - a.length);
+    for (const k of learnedKeys) {
+      if (k && (key.includes(k) || k.includes(key))) return cashflow.categoryMappings[k].type || fallbackType;
+    }
+  }
+  return fallbackType;
+}
+
+function learnFromTransactions(transactions) {
+  for (const t of transactions) {
+    const key = normalizeDescriptionKey(t.description);
+    if (!key) continue;
+    cashflow.categoryMappings[key] = { category: t.category, type: t.type };
+  }
 }
 
 function mostCommonMonth(dates) {
@@ -700,18 +794,30 @@ async function handleBankStatementFile(file) {
     if (!res.ok) throw new Error(data.error || "Parsing failed");
 
     const fields = data.fields || {};
-    pendingBankTransactions = (fields.transactions || []).map((t, i) => ({
-      id: "tx-" + i,
-      date: t.date || "",
-      description: t.description || "",
-      amount: Number(t.amount) || 0,
-      type: t.type === "credit" ? "credit" : "debit",
-      category: guessCategoryForDescription(t.description),
-      include: true,
-    }));
+    pendingBankTransactions = (fields.transactions || []).map((t, i) => {
+      const aiType = t.type === "credit" ? "credit" : "debit";
+      return {
+        id: "tx-" + i,
+        date: t.date || "",
+        description: t.description || "",
+        amount: Number(t.amount) || 0,
+        type: guessTypeForDescription(t.description, aiType),
+        category: guessCategoryForDescription(t.description),
+        include: true,
+      };
+    });
 
     document.getElementById("btMonth").value = mostCommonMonth(pendingBankTransactions.map((t) => t.date));
-    pendingBankAccountName = fields.accountName || "";
+    pendingBankAccountMeta = {
+      bankName: fields.bankName || "",
+      accountNumber: fields.accountNumber || "",
+      accountType: fields.accountType || "",
+      closingBalance: fields.closingBalance ?? null,
+    };
+    document.getElementById("btBankName").value = pendingBankAccountMeta.bankName;
+    document.getElementById("btAccountNumber").value = pendingBankAccountMeta.accountNumber;
+    document.getElementById("btAccountType").value = pendingBankAccountMeta.accountType;
+    document.getElementById("btClosingBalance").value = pendingBankAccountMeta.closingBalance ?? "";
     renderBankTxReviewTable();
 
     statusEl.hidden = true;
@@ -781,6 +887,28 @@ function syncPendingBankTxFromTable() {
   });
 }
 
+function upsertBankAccount(meta) {
+  if (!meta.bankName && !meta.accountNumber) return null;
+  let acct = meta.accountNumber
+    ? cashflow.bankAccounts.find((a) => a.accountNumber && a.accountNumber === meta.accountNumber)
+    : null;
+  if (!acct) {
+    acct = cashflow.bankAccounts.find(
+      (a) => a.bankName === meta.bankName && a.accountType === meta.accountType && !meta.accountNumber
+    );
+  }
+  if (!acct) {
+    acct = { id: "acct-" + Date.now(), bankName: "", accountNumber: "", accountType: "", currentBalance: 0 };
+    cashflow.bankAccounts.push(acct);
+  }
+  if (meta.bankName) acct.bankName = meta.bankName;
+  if (meta.accountNumber) acct.accountNumber = meta.accountNumber;
+  if (meta.accountType) acct.accountType = meta.accountType;
+  if (meta.closingBalance != null) acct.currentBalance = meta.closingBalance;
+  acct.lastUpdatedAt = new Date().toISOString();
+  return acct;
+}
+
 function saveBankStatementReview() {
   syncPendingBankTxFromTable();
   const month = document.getElementById("btMonth").value;
@@ -789,19 +917,30 @@ function saveBankStatementReview() {
     return;
   }
 
+  const accountMeta = {
+    bankName: document.getElementById("btBankName").value.trim(),
+    accountNumber: document.getElementById("btAccountNumber").value.trim(),
+    accountType: document.getElementById("btAccountType").value.trim(),
+    closingBalance: document.getElementById("btClosingBalance").value === "" ? null : Number(document.getElementById("btClosingBalance").value),
+  };
+
   const included = pendingBankTransactions.filter((t) => t.include);
   const income = included.filter((t) => t.type === "credit").reduce((s, t) => s + t.amount, 0);
   const expenses = included
     .filter((t) => t.type === "debit")
     .map((t) => ({ name: t.description || "Transaction", category: t.category, amount: t.amount }));
 
+  learnFromTransactions(included);
+
   cashflow.monthlyLogs = cashflow.monthlyLogs.filter((l) => l.month !== month);
   cashflow.monthlyLogs.push({ id: "log-" + Date.now(), month, income, expenses });
+
+  const acct = upsertBankAccount(accountMeta);
 
   cashflow.bankStatements.push({
     id: "bstmt-" + Date.now(),
     month,
-    accountName: pendingBankAccountName,
+    accountName: [accountMeta.bankName, accountMeta.accountNumber].filter(Boolean).join(" "),
     transactionCount: included.length,
     uploadedAt: new Date().toISOString(),
   });
@@ -810,8 +949,9 @@ function saveBankStatementReview() {
   document.getElementById("bankStatementReview").hidden = true;
   document.getElementById("bankStatementFile").value = "";
   pendingBankTransactions = [];
-  pendingBankAccountName = "";
+  pendingBankAccountMeta = { bankName: "", accountNumber: "", accountType: "", closingBalance: null };
   renderCashflowView();
+  renderNetWorth();
 }
 
 function renderBankStatementHistoryTable() {
@@ -1448,7 +1588,7 @@ function bindEvents() {
     document.getElementById("bankStatementReview").hidden = true;
     document.getElementById("bankStatementFile").value = "";
     pendingBankTransactions = [];
-    pendingBankAccountName = "";
+    pendingBankAccountMeta = { bankName: "", accountNumber: "", accountType: "", closingBalance: null };
   });
 
   // ---- Investment view events ----
