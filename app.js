@@ -44,9 +44,7 @@ function loadData() {
   if (!parsed.cashflow.budgetSplit) parsed.cashflow.budgetSplit = { needs: 50, savings: 20, wants: 30 };
   if (!Array.isArray(parsed.cashflow.recurringExpenses)) parsed.cashflow.recurringExpenses = [];
   if (!Array.isArray(parsed.cashflow.monthlyLogs)) parsed.cashflow.monthlyLogs = [];
-  parsed.investments.forEach((inv) => {
-    if (typeof inv.currentValue !== "number") inv.currentValue = inv.investedAmount;
-  });
+  parsed.investments = parsed.investments.map(normalizeInvestment);
 
   debts = parsed.debts;
   cashflow = parsed.cashflow;
@@ -694,6 +692,45 @@ function closeMonthLogModal() {
 // INVESTMENT MANAGEMENT VIEW
 // ================================================================
 
+const TAX_SECTION_LIMITS = { "80C": 150000, "80D": 25000, "80CCD(1B)": 50000 };
+
+function guessTaxSection(type) {
+  const t = (type || "").toLowerCase();
+  if (t.includes("nps")) return "80CCD(1B)";
+  if (t.includes("health") || t.includes("mediclaim")) return "80D";
+  if (t.includes("elss") || t.includes("epf") || t.includes("ppf") || t.includes("insurance") || t.includes("lic") || t.includes("tuition")) return "80C";
+  return "None";
+}
+
+function getIndianFY(dateLike) {
+  const d = dateLike ? new Date(dateLike) : new Date();
+  const y = d.getFullYear();
+  const startYear = d.getMonth() >= 3 ? y : y - 1;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+function normalizeInvestment(inv) {
+  if (typeof inv.investedAmount !== "number") inv.investedAmount = 0;
+  if (typeof inv.currentValue !== "number") inv.currentValue = inv.investedAmount;
+  if (typeof inv.folioNumber !== "string") inv.folioNumber = "";
+  if (typeof inv.payoutDate !== "string") inv.payoutDate = "";
+  if (!Array.isArray(inv.statements)) inv.statements = [];
+  if (!inv.contributionsByFY || typeof inv.contributionsByFY !== "object") inv.contributionsByFY = {};
+  if (!inv.taxSection) inv.taxSection = guessTaxSection(inv.type);
+  return inv;
+}
+
+function estimateLockInEnd(inv) {
+  if (!inv.investmentDate || !inv.lockInPeriod) return null;
+  const match = /(\d+(?:\.\d+)?)\s*year/i.exec(inv.lockInPeriod);
+  if (!match) return null;
+  const years = parseFloat(match[1]);
+  const d = new Date(inv.investmentDate);
+  if (isNaN(d.getTime())) return null;
+  d.setMonth(d.getMonth() + Math.round(years * 12));
+  return d.toISOString().slice(0, 10);
+}
+
 function renderInvestmentView() {
   const totalInvested = investments.reduce((s, i) => s + i.investedAmount, 0);
   const totalCurrent = investments.reduce((s, i) => s + i.currentValue, 0);
@@ -713,21 +750,32 @@ function renderInvestmentView() {
       .map((inv) => {
         const g = inv.currentValue - inv.investedAmount;
         const gPct = inv.investedAmount > 0 ? (g / inv.investedAmount) * 100 : 0;
+        const estimatedLockInEnd = estimateLockInEnd(inv);
+        const payoutDisplay = inv.payoutDate
+          ? inv.payoutDate
+          : estimatedLockInEnd
+          ? `~${estimatedLockInEnd} (est.)`
+          : "-";
         return `<tr data-id="${inv.id}">
           <td>${escapeHtml(inv.name)}</td>
           <td>${escapeHtml(inv.type || "")}</td>
+          <td>${escapeHtml(inv.folioNumber || "-")}</td>
           <td>${INR(inv.investedAmount)}</td>
           <td>${INR(inv.currentValue)}</td>
           <td class="${g >= 0 ? "positive" : "negative"}">${INR(g)} (${gPct.toFixed(1)}%)</td>
           <td>${inv.investmentDate || "-"}</td>
           <td>${escapeHtml(inv.lockInPeriod || "-")}</td>
+          <td>${payoutDisplay}</td>
+          <td>${inv.taxSection || "-"}</td>
           <td><button class="row-edit investment-edit" data-id="${inv.id}">Edit</button></td>
         </tr>`;
       })
-      .join("") || `<tr><td colspan="8">No investments yet.</td></tr>`;
+      .join("") || `<tr><td colspan="11">No investments yet.</td></tr>`;
 
   renderAllocationChart();
   renderInvestedVsCurrentChart();
+  renderInvestmentStatementHistoryTable();
+  renderTaxBenefitPanel();
 }
 
 function renderAllocationChart() {
@@ -775,6 +823,191 @@ function renderInvestedVsCurrentChart() {
   });
 }
 
+// ---------- Investment Statements ----------
+
+let pendingInvestmentStatement = null;
+
+function populateMatchInvestmentSelect(guessFolioNumber, guessName) {
+  const select = document.getElementById("isMatchInvestment");
+  let matchIndex = guessFolioNumber
+    ? investments.findIndex((i) => i.folioNumber && i.folioNumber.toLowerCase() === guessFolioNumber.toLowerCase())
+    : -1;
+  if (matchIndex === -1 && guessName) {
+    const needle = guessName.toLowerCase();
+    matchIndex = investments.findIndex(
+      (i) => i.name.toLowerCase().includes(needle) || needle.includes(i.name.toLowerCase())
+    );
+  }
+  select.innerHTML =
+    `<option value="__new__">+ Create new investment</option>` +
+    investments.map((i, idx) => `<option value="${i.id}" ${idx === matchIndex ? "selected" : ""}>${escapeHtml(i.name)}</option>`).join("");
+  if (matchIndex === -1) select.value = "__new__";
+}
+
+async function handleInvestmentStatementFile(file) {
+  const statusEl = document.getElementById("investmentStatementStatus");
+  statusEl.hidden = false;
+  statusEl.textContent = "Extracting text from PDF...";
+  document.getElementById("investmentStatementReview").hidden = true;
+
+  try {
+    const text = await extractPdfText(file);
+    statusEl.textContent = "Asking AI to read the investment details...";
+
+    const res = await fetch("/api/parse-investment-statement", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text.slice(0, 12000) }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Parsing failed");
+
+    pendingInvestmentStatement = data.fields || {};
+    const f = pendingInvestmentStatement;
+    document.getElementById("isFolioNumber").value = f.folioNumber || "";
+    document.getElementById("isFundType").value = [f.fundName, f.investmentType].filter(Boolean).join(" - ");
+    document.getElementById("isStatementDate").value = f.statementDate || "";
+    document.getElementById("isCurrentValue").value = f.currentValue ?? "";
+    document.getElementById("isInvestedThisStatement").value = f.investedAmountThisStatement ?? "";
+    document.getElementById("isMaturityDate").value = f.maturityDate || "";
+    document.getElementById("isTaxSection").value = f.taxSection || "";
+    populateMatchInvestmentSelect(f.folioNumber, f.fundName);
+
+    statusEl.hidden = true;
+    document.getElementById("investmentStatementReview").hidden = false;
+  } catch (err) {
+    statusEl.hidden = false;
+    statusEl.textContent = "Couldn't read this statement: " + err.message +
+      " (requires the /api/parse-investment-statement serverless function deployed with GEMINI_API_KEY set).";
+  }
+}
+
+function saveInvestmentStatementReview() {
+  const matchId = document.getElementById("isMatchInvestment").value;
+  const statementDate = document.getElementById("isStatementDate").value;
+  const entry = {
+    folioNumber: document.getElementById("isFolioNumber").value.trim(),
+    fundType: document.getElementById("isFundType").value.trim(),
+    statementDate,
+    currentValue: document.getElementById("isCurrentValue").value === "" ? null : Number(document.getElementById("isCurrentValue").value),
+    investedThisStatement: document.getElementById("isInvestedThisStatement").value === "" ? null : Number(document.getElementById("isInvestedThisStatement").value),
+    maturityDate: document.getElementById("isMaturityDate").value,
+    taxSection: document.getElementById("isTaxSection").value,
+    uploadedAt: new Date().toISOString(),
+  };
+
+  let inv;
+  if (matchId === "__new__") {
+    inv = normalizeInvestment({
+      id: "inv-" + Date.now(),
+      name: entry.fundType || entry.folioNumber || "New Investment",
+      type: entry.fundType || "",
+      folioNumber: entry.folioNumber,
+      investedAmount: entry.investedThisStatement || 0,
+      currentValue: entry.currentValue || entry.investedThisStatement || 0,
+      investmentDate: statementDate || "",
+      lockInPeriod: "",
+      payoutDate: entry.maturityDate,
+      taxSection: entry.taxSection,
+      contributionsByFY: {},
+    });
+    investments.push(inv);
+  } else {
+    inv = investments.find((i) => i.id === matchId);
+  }
+
+  inv.statements.push(entry);
+
+  if (document.getElementById("isApplyToInvestment").checked && matchId !== "__new__") {
+    if (entry.currentValue != null) inv.currentValue = entry.currentValue;
+    if (entry.maturityDate) inv.payoutDate = entry.maturityDate;
+    if (entry.folioNumber) inv.folioNumber = entry.folioNumber;
+    if (entry.taxSection) inv.taxSection = entry.taxSection;
+    if (entry.investedThisStatement != null && statementDate) {
+      const fy = getIndianFY(statementDate);
+      inv.contributionsByFY[fy] = entry.investedThisStatement;
+      inv.investedAmount = Object.values(inv.contributionsByFY).reduce((s, v) => s + v, 0) || inv.investedAmount;
+    }
+  }
+
+  saveData();
+  document.getElementById("investmentStatementReview").hidden = true;
+  document.getElementById("investmentStatementFile").value = "";
+  pendingInvestmentStatement = null;
+  renderInvestmentView();
+  renderNetWorth();
+}
+
+function renderInvestmentStatementHistoryTable() {
+  const rows = [];
+  for (const inv of investments) {
+    for (const s of inv.statements || []) {
+      rows.push({ invName: inv.name, ...s });
+    }
+  }
+  rows.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+  document.getElementById("investmentStatementHistoryBody").innerHTML =
+    rows
+      .map(
+        (r) => `<tr>
+          <td>${escapeHtml(r.invName)}</td>
+          <td>${escapeHtml(r.folioNumber || "-")}</td>
+          <td>${r.statementDate || "-"}</td>
+          <td>${r.currentValue != null ? INR(r.currentValue) : "-"}</td>
+          <td>${r.investedThisStatement != null ? INR(r.investedThisStatement) : "-"}</td>
+          <td>${r.maturityDate || "-"}</td>
+          <td>${new Date(r.uploadedAt).toLocaleString("en-IN")}</td>
+        </tr>`
+      )
+      .join("") || `<tr><td colspan="7">No statements uploaded yet.</td></tr>`;
+}
+
+// ---------- Tax Benefit Panel ----------
+
+let taxSelectedFY = null;
+let taxSelectedRegime = "old";
+
+function renderTaxBenefitPanel() {
+  const fySet = new Set([getIndianFY()]);
+  investments.forEach((inv) => Object.keys(inv.contributionsByFY || {}).forEach((fy) => fySet.add(fy)));
+  const fys = [...fySet].sort();
+  if (!taxSelectedFY || !fys.includes(taxSelectedFY)) taxSelectedFY = fys[fys.length - 1];
+
+  const fySelect = document.getElementById("taxFySelect");
+  fySelect.innerHTML = fys.map((fy) => `<option value="${fy}" ${fy === taxSelectedFY ? "selected" : ""}>FY ${fy}</option>`).join("");
+  document.getElementById("taxRegimeSelect").value = taxSelectedRegime;
+
+  const noteEl = document.getElementById("taxRegimeNote");
+  if (taxSelectedRegime === "new") {
+    noteEl.textContent = "Under the New Tax Regime, 80C / 80D / 80CCD(1B) deductions generally aren't available — utilization is shown as ₹0. (Employer NPS contributions under 80CCD(2) still apply but aren't tracked here.)";
+  } else {
+    noteEl.textContent = "Old Regime section limits shown below reflect standard slabs — actual eligibility can vary (e.g. 80D limits differ by age). Consult a CA for filing.";
+  }
+
+  const utilized = { "80C": 0, "80D": 0, "80CCD(1B)": 0 };
+  if (taxSelectedRegime === "old") {
+    for (const inv of investments) {
+      const amt = (inv.contributionsByFY || {})[taxSelectedFY] || 0;
+      if (utilized[inv.taxSection] != null) utilized[inv.taxSection] += amt;
+    }
+  }
+
+  document.getElementById("taxBenefitTableBody").innerHTML = Object.entries(TAX_SECTION_LIMITS)
+    .map(([section, limit]) => {
+      const used = Math.min(utilized[section] || 0, limit);
+      const remaining = Math.max(0, limit - used);
+      const pct = Math.min(100, Math.round((used / limit) * 100));
+      return `<tr>
+        <td>${section}</td>
+        <td>${INR(used)}</td>
+        <td>${INR(limit)}</td>
+        <td>${INR(remaining)}</td>
+        <td><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div> ${pct}%</td>
+      </tr>`;
+    })
+    .join("");
+}
+
 async function getInvestmentAiCommentary() {
   const box = document.getElementById("investmentAiCommentary");
   box.hidden = false;
@@ -809,12 +1042,29 @@ function openInvestmentModal(inv) {
   document.getElementById("iId").value = inv ? inv.id : "";
   document.getElementById("iName").value = inv ? inv.name : "";
   document.getElementById("iType").value = inv ? inv.type || "" : "";
+  document.getElementById("iFolioNumber").value = inv ? inv.folioNumber || "" : "";
   document.getElementById("iInvested").value = inv ? inv.investedAmount : "";
   document.getElementById("iCurrent").value = inv ? inv.currentValue : "";
   document.getElementById("iDate").value = inv ? inv.investmentDate || "" : "";
   document.getElementById("iLockIn").value = inv ? inv.lockInPeriod || "" : "";
+  document.getElementById("iPayoutDate").value = inv ? inv.payoutDate || "" : "";
+  document.getElementById("iTaxSection").value = inv ? inv.taxSection || "" : "";
   document.getElementById("iNotes").value = inv ? inv.notes || "" : "";
   document.getElementById("btnDeleteInvestment").hidden = !inv;
+
+  const historyBox = document.getElementById("iStatementHistory");
+  const statements = inv && Array.isArray(inv.statements) ? inv.statements : [];
+  if (statements.length === 0) {
+    historyBox.innerHTML = "";
+  } else {
+    const rows = [...statements]
+      .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))
+      .map((s) => `<tr><td>${s.statementDate || "-"}</td><td>${s.currentValue != null ? INR(s.currentValue) : "-"}</td><td>${s.maturityDate || "-"}</td></tr>`)
+      .join("");
+    historyBox.innerHTML = `<div>Statement history (${statements.length})</div>
+      <table><thead><tr><th>Date</th><th>Value</th><th>Maturity</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
   document.getElementById("investmentModal").hidden = false;
 }
 
@@ -1014,16 +1264,19 @@ function bindEvents() {
     const payload = {
       name: document.getElementById("iName").value.trim(),
       type: document.getElementById("iType").value.trim(),
+      folioNumber: document.getElementById("iFolioNumber").value.trim(),
       investedAmount: Number(document.getElementById("iInvested").value) || 0,
       currentValue: Number(document.getElementById("iCurrent").value) || 0,
       investmentDate: document.getElementById("iDate").value,
       lockInPeriod: document.getElementById("iLockIn").value.trim(),
+      payoutDate: document.getElementById("iPayoutDate").value,
+      taxSection: document.getElementById("iTaxSection").value,
       notes: document.getElementById("iNotes").value.trim(),
     };
     if (id) {
       Object.assign(investments.find((i) => i.id === id), payload);
     } else {
-      investments.push({ id: "inv-" + Date.now(), ...payload });
+      investments.push(normalizeInvestment({ id: "inv-" + Date.now(), ...payload }));
     }
     saveData();
     closeInvestmentModal();
@@ -1048,6 +1301,32 @@ function bindEvents() {
   });
 
   document.getElementById("btnInvestmentAi").addEventListener("click", getInvestmentAiCommentary);
+
+  document.getElementById("investmentStatementFile").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) handleInvestmentStatementFile(file);
+  });
+
+  document.getElementById("investmentStatementForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    saveInvestmentStatementReview();
+  });
+
+  document.getElementById("btnCancelInvestmentStatement").addEventListener("click", () => {
+    document.getElementById("investmentStatementReview").hidden = true;
+    document.getElementById("investmentStatementFile").value = "";
+    pendingInvestmentStatement = null;
+  });
+
+  document.getElementById("taxFySelect").addEventListener("change", (e) => {
+    taxSelectedFY = e.target.value;
+    renderTaxBenefitPanel();
+  });
+
+  document.getElementById("taxRegimeSelect").addEventListener("change", (e) => {
+    taxSelectedRegime = e.target.value;
+    renderTaxBenefitPanel();
+  });
 }
 
 bindEvents();

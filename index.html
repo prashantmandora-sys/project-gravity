@@ -223,7 +223,8 @@
       <div class="table-wrap">
         <table id="investmentTable">
           <thead>
-            <tr><th>Name</th><th>Type</th><th>Invested</th><th>Current Value</th><th>Gain/Loss</th><th>Since</th><th>Lock-in</th><th></th></tr>
+            <tr><th>Name</th><th>Type</th><th>Folio/Policy #</th><th>Invested</th><th>Current Value</th><th>Gain/Loss</th>
+              <th>Since</th><th>Lock-in</th><th>Payout/Maturity</th><th>Tax Section</th><th></th></tr>
           </thead>
           <tbody id="investmentTableBody"></tbody>
         </table>
@@ -238,6 +239,80 @@
       <div class="panel">
         <h2>Invested vs Current Value</h2>
         <canvas id="chartInvestedVsCurrent" height="220"></canvas>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Investment Statements</h2>
+      <p class="hint">Upload a mutual fund / insurance / EPF / any investment statement PDF. Text is extracted in your
+        browser, then AI reads out the folio/policy number, current value, and maturity/payout date so it can be
+        matched and logged against the right holding.</p>
+      <div class="simulator-controls">
+        <label class="btn file-btn">Upload Statement PDF<input type="file" id="investmentStatementFile" accept="application/pdf" hidden /></label>
+      </div>
+      <div id="investmentStatementStatus" class="hint" hidden></div>
+
+      <div id="investmentStatementReview" class="statement-review" hidden>
+        <h3>Extracted details &mdash; review before saving</h3>
+        <form id="investmentStatementForm">
+          <label>Folio / Policy Number <input id="isFolioNumber" type="text" /></label>
+          <label>Fund / Lender &amp; Type <input id="isFundType" type="text" /></label>
+          <label>Statement Date <input id="isStatementDate" type="date" /></label>
+          <label>Current Value (&#8377;) <input id="isCurrentValue" type="number" step="1" /></label>
+          <label>Amount Invested (this statement, if any) (&#8377;) <input id="isInvestedThisStatement" type="number" step="1" /></label>
+          <label>Maturity / Payout Date <input id="isMaturityDate" type="date" /></label>
+          <label>Tax Section
+            <select id="isTaxSection">
+              <option value="">Not tax-eligible</option>
+              <option value="80C">80C</option>
+              <option value="80D">80D</option>
+              <option value="80CCD(1B)">80CCD(1B)</option>
+            </select>
+          </label>
+          <label>Match to Investment
+            <select id="isMatchInvestment"></select>
+          </label>
+          <label class="checkbox-label"><input type="checkbox" id="isApplyToInvestment" checked /> Update this investment's current value/maturity date/tax section with these values</label>
+          <div class="modal-actions">
+            <button type="button" id="btnCancelInvestmentStatement" class="btn">Discard</button>
+            <button type="submit" class="btn primary">Save Activity</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="table-wrap">
+        <table id="investmentStatementHistoryTable">
+          <thead>
+            <tr><th>Investment</th><th>Folio #</th><th>Statement Date</th><th>Current Value</th><th>Invested (this statement)</th><th>Maturity</th><th>Uploaded</th></tr>
+          </thead>
+          <tbody id="investmentStatementHistoryBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Tax Benefit Tracker</h2>
+      </div>
+      <p class="hint">Informational only, not tax advice &mdash; standard Old Regime section limits. Under the New
+        Tax Regime, most 80C/80D deductions don't apply (except employer NPS contributions under 80CCD(2)).</p>
+      <div class="simulator-controls">
+        <label>Financial Year
+          <select id="taxFySelect"></select>
+        </label>
+        <label>Tax Regime
+          <select id="taxRegimeSelect">
+            <option value="old">Old Regime</option>
+            <option value="new">New Regime</option>
+          </select>
+        </label>
+      </div>
+      <div id="taxRegimeNote" class="hint"></div>
+      <div class="table-wrap">
+        <table id="taxBenefitTable">
+          <thead><tr><th>Section</th><th>Utilized</th><th>Limit</th><th>Remaining</th><th>Progress</th></tr></thead>
+          <tbody id="taxBenefitTableBody"></tbody>
+        </table>
       </div>
     </section>
   </section>
@@ -275,11 +350,22 @@
       <input type="hidden" id="iId" />
       <label>Name <input required id="iName" type="text" /></label>
       <label>Type <input id="iType" type="text" placeholder="Mutual Fund - ELSS, EPF, Insurance, Stock..." /></label>
+      <label>Folio / Policy Number <input id="iFolioNumber" type="text" /></label>
       <label>Invested Amount (&#8377;) <input required id="iInvested" type="number" min="0" step="1" /></label>
       <label>Current Value (&#8377;) <input id="iCurrent" type="number" min="0" step="1" /></label>
       <label>Investment Date <input id="iDate" type="date" /></label>
       <label>Lock-in Period <input id="iLockIn" type="text" placeholder="e.g. 3 Years" /></label>
+      <label>Payout / Maturity Date (if known) <input id="iPayoutDate" type="date" /></label>
+      <label>Tax Section
+        <select id="iTaxSection">
+          <option value="">Not tax-eligible</option>
+          <option value="80C">80C</option>
+          <option value="80D">80D</option>
+          <option value="80CCD(1B)">80CCD(1B)</option>
+        </select>
+      </label>
       <label>Notes <input id="iNotes" type="text" /></label>
+      <div id="iStatementHistory" class="statement-mini-history"></div>
       <div class="modal-actions">
         <button type="button" id="btnDeleteInvestment" class="btn danger" hidden>Delete</button>
         <button type="button" id="btnCancelInvestmentModal" class="btn">Cancel</button>
