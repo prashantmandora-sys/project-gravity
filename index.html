@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Debt Freedom Portal</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <h1>Debt Freedom Portal</h1>
+  <div class="topbar-actions">
+    <button id="btnAddDebt" class="btn primary">+ Add Debt</button>
+    <button id="btnExport" class="btn">Export</button>
+    <label class="btn file-btn">Import<input type="file" id="importFile" accept="application/json" hidden /></label>
+  </div>
+</header>
+
+<main>
+  <section class="summary-grid" id="summaryGrid"></section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <h2>Debts</h2>
+      <div class="filters">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="active">Active</button>
+        <button class="filter-btn" data-filter="completed">Completed</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="debtTable">
+        <thead>
+          <tr>
+            <th>Name</th><th>Type</th><th>Total</th><th>Pending</th>
+            <th>Progress</th><th>Monthly</th><th>Rate %</th><th>EMIs Left</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="debtTableBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="charts-grid">
+    <div class="panel">
+      <h2>Paid vs Pending</h2>
+      <canvas id="chartPaidPending" height="220"></canvas>
+    </div>
+    <div class="panel">
+      <h2>Pending Balance by Debt</h2>
+      <canvas id="chartByDebt" height="220"></canvas>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Payoff Simulator</h2>
+    <p class="hint">Runs entirely in your browser using your active debts. "Rate %" is optional per debt &mdash;
+      fill it in for a true avalanche (highest-interest-first) order; without it, avalanche and snowball behave the same.</p>
+    <div class="simulator-controls">
+      <label>Strategy
+        <select id="simStrategy">
+          <option value="snowball">Snowball (smallest balance first)</option>
+          <option value="avalanche">Avalanche (highest interest first)</option>
+        </select>
+      </label>
+      <label>Extra monthly payment (&#8377;)
+        <input type="number" id="simExtra" min="0" step="500" value="0" />
+      </label>
+      <button id="btnSimulate" class="btn primary">Run Simulation</button>
+      <button id="btnAiCommentary" class="btn">Get AI Strategy Commentary</button>
+    </div>
+    <div id="simResults" class="sim-results" hidden>
+      <div class="sim-stats" id="simStats"></div>
+      <canvas id="chartSim" height="240"></canvas>
+      <ol id="simOrder" class="sim-order"></ol>
+    </div>
+    <div id="aiCommentary" class="ai-commentary" hidden></div>
+  </section>
+
+  <section class="panel">
+    <h2>Loan Statements</h2>
+    <p class="hint">Upload a loan statement PDF. Text is extracted in your browser, then AI reads out the loan number,
+      type, balance, EMI and due date so it can be logged against the right loan's history.</p>
+    <div class="simulator-controls">
+      <label class="btn file-btn">Upload Statement PDF<input type="file" id="statementFile" accept="application/pdf" hidden /></label>
+    </div>
+    <div id="statementStatus" class="hint" hidden></div>
+
+    <div id="statementReview" class="statement-review" hidden>
+      <h3>Extracted details &mdash; review before saving</h3>
+      <form id="statementForm">
+        <label>Loan Number <input id="sLoanNumber" type="text" /></label>
+        <label>Lender / Type <input id="sLoanType" type="text" /></label>
+        <label>Statement Date <input id="sStatementDate" type="date" /></label>
+        <label>Outstanding Balance (&#8377;) <input id="sBalance" type="number" step="1" /></label>
+        <label>EMI Amount (&#8377;) <input id="sEmi" type="number" step="1" /></label>
+        <label>Next Due Date <input id="sDueDate" type="date" /></label>
+        <label>Interest Rate % <input id="sRate" type="number" step="0.1" /></label>
+        <label>Match to Debt
+          <select id="sMatchDebt"></select>
+        </label>
+        <label class="checkbox-label"><input type="checkbox" id="sApplyToDebt" checked /> Update this debt's balance/EMI/rate with these values</label>
+        <div class="modal-actions">
+          <button type="button" id="btnCancelStatement" class="btn">Discard</button>
+          <button type="submit" class="btn primary">Save Activity</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="table-wrap">
+      <table id="statementHistoryTable">
+        <thead>
+          <tr><th>Debt</th><th>Loan #</th><th>Statement Date</th><th>Balance</th><th>EMI</th><th>Next Due</th><th>Uploaded</th></tr>
+        </thead>
+        <tbody id="statementHistoryBody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div id="debtModal" class="modal" hidden>
+  <div class="modal-card">
+    <h2 id="modalTitle">Add Debt</h2>
+    <form id="debtForm">
+      <input type="hidden" id="fId" />
+      <label>Name <input required id="fName" type="text" /></label>
+      <label>Type <input id="fType" type="text" /></label>
+      <label>Loan Number <input id="fLoanNumber" type="text" /></label>
+      <label>Total Amount (&#8377;) <input required id="fTotal" type="number" min="0" step="1" /></label>
+      <label>Pending Amount (&#8377;) <input required id="fPending" type="number" min="0" step="1" /></label>
+      <label>Monthly Payment (&#8377;) <input id="fMonthly" type="number" min="0" step="1" /></label>
+      <label>Pending EMIs <input id="fEmis" type="number" min="0" step="1" /></label>
+      <label>Interest Rate % (optional) <input id="fRate" type="number" min="0" step="0.1" /></label>
+      <div id="fStatementHistory" class="statement-mini-history"></div>
+      <div class="modal-actions">
+        <button type="button" id="btnDeleteDebt" class="btn danger" hidden>Delete</button>
+        <button type="button" id="btnCancelModal" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="data-seed.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>

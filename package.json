@@ -1,0 +1,6 @@
+{
+  "name": "debt-freedom-portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static debt-tracking portal with a Vercel serverless AI commentary endpoint"
+}
