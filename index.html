@@ -191,6 +191,42 @@
     </section>
 
     <section class="panel">
+      <h2>Bank / Card Statement Upload</h2>
+      <p class="hint">Upload a bank or credit card statement PDF. Transactions are extracted and auto-categorized
+        (matched against your recurring templates where possible), then you review and merge them into a month's
+        log &mdash; no manual line-by-line entry.</p>
+      <div class="simulator-controls">
+        <label class="btn file-btn">Upload Statement PDF<input type="file" id="bankStatementFile" accept="application/pdf" hidden /></label>
+      </div>
+      <div id="bankStatementStatus" class="hint" hidden></div>
+
+      <div id="bankStatementReview" class="statement-review" hidden>
+        <h3>Extracted transactions &mdash; review, edit, and categorize before saving</h3>
+        <div class="simulator-controls">
+          <label>Target Month <input type="month" id="btMonth" /></label>
+        </div>
+        <div id="btSummary" class="hint"></div>
+        <div class="table-wrap">
+          <table id="btTransactionTable">
+            <thead><tr><th>Include</th><th>Date</th><th>Description</th><th>Amount (&#8377;)</th><th>Type</th><th>Category</th></tr></thead>
+            <tbody id="btTransactionTableBody"></tbody>
+          </table>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btnCancelBankStatement" class="btn">Discard</button>
+          <button type="button" id="btnSaveBankStatement" class="btn primary">Merge into Monthly Log</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="bankStatementHistoryTable">
+          <thead><tr><th>Month</th><th>Account</th><th>Transactions</th><th>Uploaded</th></tr></thead>
+          <tbody id="bankStatementHistoryBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
       <div class="panel-header">
         <h2>Monthly Logs</h2>
         <button id="btnCashflowAi" class="btn">Get AI Cashflow Insights</button>

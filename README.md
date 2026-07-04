@@ -3,14 +3,14 @@
 A static personal finance portal with three views, seeded from `My Finances.xlsx`.
 
 - **Debt Management**: debt list, payoff simulator (snowball/avalanche), PDF loan statement upload with AI extraction.
-- **Cashflow Management**: monthly income/expense logging, 50/20/30-style budget rule vs actual, recurring expense templates, EMI outflows pulled live from Debt Management, net cashflow trend.
-- **Investment Management**: holdings tracker (invested vs current value, gain/loss), allocation chart, AI portfolio insights.
+- **Cashflow Management**: monthly income/expense logging, 50/20/30-style budget rule vs actual, recurring expense templates, EMI outflows pulled live from Debt Management, net cashflow trend, and bank/card statement PDF upload that extracts transactions and merges them into a month's log.
+- **Investment Management**: holdings tracker (invested vs current value, gain/loss), folio/policy number + payout/maturity date tracking, PDF investment statement upload with AI extraction, per-financial-year Tax Benefit panel (80C/80D/80CCD(1B) vs Old/New regime), allocation chart, AI portfolio insights.
 - A **Net Worth** strip (Investments − Pending Debt) is always visible in the header across all views.
 
 - **Frontend**: plain HTML/CSS/JS, no build step, no framework. Charts via Chart.js (CDN). PDF text extraction via PDF.js (CDN).
 - **Data**: seeded once from `data-seed.js` into `localStorage` (single object: `{ debts, cashflow, investments }`); edit/add/delete in the app from then on. Use Export/Import to back up or move data between browsers/devices.
 - **Simulator**: snowball vs avalanche payoff simulation, runs entirely client-side.
-- **AI features** (`/api/ai-commentary.js`, `/api/parse-statement.js`, `/api/cashflow-insights.js`, `/api/investment-insights.js`): Vercel serverless functions that call the **Google Gemini API** (free tier, no credit card needed). Requires a `GEMINI_API_KEY` environment variable set in the Vercel project — never commit the key.
+- **AI features** (`/api/ai-commentary.js`, `/api/parse-statement.js`, `/api/cashflow-insights.js`, `/api/investment-insights.js`, `/api/parse-investment-statement.js`, `/api/parse-bank-statement.js`): Vercel serverless functions that call the **Google Gemini API** (free tier, no credit card needed). Requires a `GEMINI_API_KEY` environment variable set in the Vercel project — never commit the key.
 
 ## Run locally
 

@@ -44,6 +44,7 @@ function loadData() {
   if (!parsed.cashflow.budgetSplit) parsed.cashflow.budgetSplit = { needs: 50, savings: 20, wants: 30 };
   if (!Array.isArray(parsed.cashflow.recurringExpenses)) parsed.cashflow.recurringExpenses = [];
   if (!Array.isArray(parsed.cashflow.monthlyLogs)) parsed.cashflow.monthlyLogs = [];
+  if (!Array.isArray(parsed.cashflow.bankStatements)) parsed.cashflow.bankStatements = [];
   parsed.investments = parsed.investments.map(normalizeInvestment);
 
   debts = parsed.debts;
@@ -538,6 +539,7 @@ function renderCashflowView() {
   document.getElementById("bWants").value = cashflow.budgetSplit.wants;
 
   renderRecurringTable();
+  renderBankStatementHistoryTable();
   renderMonthlyLogTable(logs);
   renderBudgetVsActualChart(latest);
   renderCashflowTrendChart(logs);
@@ -653,6 +655,178 @@ async function getCashflowAiCommentary() {
     box.className = "ai-commentary error";
     box.textContent = "Couldn't get AI insights: " + err.message + "\n\n(This requires the /api/cashflow-insights serverless function to be deployed with a GEMINI_API_KEY set.)";
   }
+}
+
+// ---------- Bank / Card Statement Upload ----------
+
+let pendingBankTransactions = [];
+let pendingBankAccountName = "";
+
+function guessCategoryForDescription(description) {
+  const desc = (description || "").toLowerCase();
+  const match = cashflow.recurringExpenses.find(
+    (r) => desc.includes(r.name.toLowerCase()) || r.name.toLowerCase().includes(desc)
+  );
+  return match ? match.category : "wants";
+}
+
+function mostCommonMonth(dates) {
+  const counts = {};
+  for (const d of dates) {
+    const month = (d || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    counts[month] = (counts[month] || 0) + 1;
+  }
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  return entries.length ? entries[0][0] : new Date().toISOString().slice(0, 7);
+}
+
+async function handleBankStatementFile(file) {
+  const statusEl = document.getElementById("bankStatementStatus");
+  statusEl.hidden = false;
+  statusEl.textContent = "Extracting text from PDF...";
+  document.getElementById("bankStatementReview").hidden = true;
+
+  try {
+    const text = await extractPdfText(file);
+    statusEl.textContent = "Asking AI to read the transactions...";
+
+    const res = await fetch("/api/parse-bank-statement", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text.slice(0, 20000) }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Parsing failed");
+
+    const fields = data.fields || {};
+    pendingBankTransactions = (fields.transactions || []).map((t, i) => ({
+      id: "tx-" + i,
+      date: t.date || "",
+      description: t.description || "",
+      amount: Number(t.amount) || 0,
+      type: t.type === "credit" ? "credit" : "debit",
+      category: guessCategoryForDescription(t.description),
+      include: true,
+    }));
+
+    document.getElementById("btMonth").value = mostCommonMonth(pendingBankTransactions.map((t) => t.date));
+    pendingBankAccountName = fields.accountName || "";
+    renderBankTxReviewTable();
+
+    statusEl.hidden = true;
+    document.getElementById("bankStatementReview").hidden = false;
+  } catch (err) {
+    statusEl.hidden = false;
+    statusEl.textContent = "Couldn't read this statement: " + err.message +
+      " (requires the /api/parse-bank-statement serverless function deployed with GEMINI_API_KEY set).";
+  }
+}
+
+function renderBankTxReviewTable() {
+  document.getElementById("btTransactionTableBody").innerHTML = pendingBankTransactions
+    .map(
+      (t) => `<tr data-id="${t.id}">
+        <td><input type="checkbox" class="btInclude" data-id="${t.id}" ${t.include ? "checked" : ""} /></td>
+        <td><input type="date" class="btDate" data-id="${t.id}" value="${t.date}" /></td>
+        <td><input type="text" class="btDesc" data-id="${t.id}" value="${escapeHtml(t.description)}" /></td>
+        <td><input type="number" class="btAmount" data-id="${t.id}" value="${t.amount}" min="0" step="1" /></td>
+        <td><select class="btType" data-id="${t.id}">
+          <option value="debit" ${t.type === "debit" ? "selected" : ""}>Debit</option>
+          <option value="credit" ${t.type === "credit" ? "selected" : ""}>Credit</option>
+        </select></td>
+        <td><select class="btCategory" data-id="${t.id}" ${t.type === "credit" ? "disabled" : ""}>
+          <option value="needs" ${t.category === "needs" ? "selected" : ""}>Needs</option>
+          <option value="savings" ${t.category === "savings" ? "selected" : ""}>Savings</option>
+          <option value="wants" ${t.category === "wants" ? "selected" : ""}>Wants</option>
+        </select></td>
+      </tr>`
+    )
+    .join("");
+  updateBtSummary();
+}
+
+function updateBtSummary() {
+  const included = pendingBankTransactions.filter((t) => t.include);
+  const credits = included.filter((t) => t.type === "credit").reduce((s, t) => s + t.amount, 0);
+  const debits = included.filter((t) => t.type === "debit").reduce((s, t) => s + t.amount, 0);
+  document.getElementById("btSummary").textContent =
+    `${included.length} transactions included: ${INR(credits)} in credits, ${INR(debits)} in debits.`;
+}
+
+function syncPendingBankTxFromTable() {
+  document.querySelectorAll(".btInclude").forEach((el) => {
+    const t = pendingBankTransactions.find((x) => x.id === el.dataset.id);
+    if (t) t.include = el.checked;
+  });
+  document.querySelectorAll(".btDate").forEach((el) => {
+    const t = pendingBankTransactions.find((x) => x.id === el.dataset.id);
+    if (t) t.date = el.value;
+  });
+  document.querySelectorAll(".btDesc").forEach((el) => {
+    const t = pendingBankTransactions.find((x) => x.id === el.dataset.id);
+    if (t) t.description = el.value;
+  });
+  document.querySelectorAll(".btAmount").forEach((el) => {
+    const t = pendingBankTransactions.find((x) => x.id === el.dataset.id);
+    if (t) t.amount = Number(el.value) || 0;
+  });
+  document.querySelectorAll(".btType").forEach((el) => {
+    const t = pendingBankTransactions.find((x) => x.id === el.dataset.id);
+    if (t) t.type = el.value;
+  });
+  document.querySelectorAll(".btCategory").forEach((el) => {
+    const t = pendingBankTransactions.find((x) => x.id === el.dataset.id);
+    if (t) t.category = el.value;
+  });
+}
+
+function saveBankStatementReview() {
+  syncPendingBankTxFromTable();
+  const month = document.getElementById("btMonth").value;
+  if (!month) {
+    alert("Please choose a target month.");
+    return;
+  }
+
+  const included = pendingBankTransactions.filter((t) => t.include);
+  const income = included.filter((t) => t.type === "credit").reduce((s, t) => s + t.amount, 0);
+  const expenses = included
+    .filter((t) => t.type === "debit")
+    .map((t) => ({ name: t.description || "Transaction", category: t.category, amount: t.amount }));
+
+  cashflow.monthlyLogs = cashflow.monthlyLogs.filter((l) => l.month !== month);
+  cashflow.monthlyLogs.push({ id: "log-" + Date.now(), month, income, expenses });
+
+  cashflow.bankStatements.push({
+    id: "bstmt-" + Date.now(),
+    month,
+    accountName: pendingBankAccountName,
+    transactionCount: included.length,
+    uploadedAt: new Date().toISOString(),
+  });
+
+  saveData();
+  document.getElementById("bankStatementReview").hidden = true;
+  document.getElementById("bankStatementFile").value = "";
+  pendingBankTransactions = [];
+  pendingBankAccountName = "";
+  renderCashflowView();
+}
+
+function renderBankStatementHistoryTable() {
+  const rows = [...cashflow.bankStatements].sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+  document.getElementById("bankStatementHistoryBody").innerHTML =
+    rows
+      .map(
+        (s) => `<tr>
+          <td>${s.month}</td>
+          <td>${escapeHtml(s.accountName || "-")}</td>
+          <td>${s.transactionCount}</td>
+          <td>${new Date(s.uploadedAt).toLocaleString("en-IN")}</td>
+        </tr>`
+      )
+      .join("") || `<tr><td colspan="4">No statements uploaded yet.</td></tr>`;
 }
 
 // ---------- Cashflow Modals ----------
@@ -1253,6 +1427,29 @@ function bindEvents() {
   });
 
   document.getElementById("btnCashflowAi").addEventListener("click", getCashflowAiCommentary);
+
+  document.getElementById("bankStatementFile").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) handleBankStatementFile(file);
+  });
+
+  document.getElementById("btTransactionTableBody").addEventListener("change", () => {
+    syncPendingBankTxFromTable();
+    updateBtSummary();
+    document.querySelectorAll(".btType").forEach((el) => {
+      const row = el.closest("tr");
+      row.querySelector(".btCategory").disabled = el.value === "credit";
+    });
+  });
+
+  document.getElementById("btnSaveBankStatement").addEventListener("click", saveBankStatementReview);
+
+  document.getElementById("btnCancelBankStatement").addEventListener("click", () => {
+    document.getElementById("bankStatementReview").hidden = true;
+    document.getElementById("bankStatementFile").value = "";
+    pendingBankTransactions = [];
+    pendingBankAccountName = "";
+  });
 
   // ---- Investment view events ----
   document.getElementById("btnAddInvestment").addEventListener("click", () => openInvestmentModal(null));
