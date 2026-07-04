@@ -40,9 +40,11 @@ function loadData() {
   parsed.debts.forEach((d) => {
     if (!Array.isArray(d.statements)) d.statements = [];
     if (typeof d.loanNumber !== "string") d.loanNumber = "";
+    if (!Array.isArray(d.paymentHistory)) d.paymentHistory = [];
   });
   if (!parsed.cashflow.budgetSplit) parsed.cashflow.budgetSplit = { needs: 50, savings: 20, wants: 30 };
   if (!Array.isArray(parsed.cashflow.recurringExpenses)) parsed.cashflow.recurringExpenses = [];
+  parsed.cashflow.recurringExpenses.forEach((r) => { if (typeof r.linkedDebtId !== "string") r.linkedDebtId = ""; });
   if (!Array.isArray(parsed.cashflow.monthlyLogs)) parsed.cashflow.monthlyLogs = [];
   if (!Array.isArray(parsed.cashflow.bankStatements)) parsed.cashflow.bankStatements = [];
   if (!parsed.cashflow.categoryMappings || typeof parsed.cashflow.categoryMappings !== "object") parsed.cashflow.categoryMappings = {};
@@ -63,6 +65,7 @@ function recalc(d) {
   d.completionPct = d.totalAmount > 0 ? Math.max(0, Math.min(1, (d.totalAmount - d.pendingAmount) / d.totalAmount)) : 1;
   if (!Array.isArray(d.statements)) d.statements = [];
   if (typeof d.loanNumber !== "string") d.loanNumber = "";
+  if (!Array.isArray(d.paymentHistory)) d.paymentHistory = [];
   return d;
 }
 
@@ -497,6 +500,19 @@ function openModal(debt) {
       <table><thead><tr><th>Date</th><th>Balance</th><th>EMI</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
+  const paymentBox = document.getElementById("fPaymentHistory");
+  const payments = debt && Array.isArray(debt.paymentHistory) ? debt.paymentHistory : [];
+  if (payments.length === 0) {
+    paymentBox.innerHTML = "";
+  } else {
+    const rows = [...payments]
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .map((p) => `<tr><td>${p.date || "-"}</td><td>${INR(p.amount)}</td><td>${escapeHtml(p.description || "-")}</td></tr>`)
+      .join("");
+    paymentBox.innerHTML = `<div>Bank-detected payments (${payments.length}) &mdash; cross-check against statement history above for discrepancies</div>
+      <table><thead><tr><th>Date</th><th>Amount</th><th>Bank Description</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
   modal.hidden = false;
 }
 
@@ -534,10 +550,7 @@ function renderCashflowView() {
     ["Budget Rule", `${cashflow.budgetSplit.needs}/${cashflow.budgetSplit.savings}/${cashflow.budgetSplit.wants}`],
   ].map(([label, value]) => `<div class="summary-card"><div class="label">${label}</div><div class="value">${value}</div></div>`).join("");
 
-  const activeDebts = debts.filter(isActive);
-  document.getElementById("emiOutflowBody").innerHTML =
-    activeDebts.map((d) => `<tr><td>${escapeHtml(d.name)}</td><td>${INR(d.monthlyPayment || 0)}</td></tr>`).join("") +
-    `<tr><td><strong>Total</strong></td><td><strong>${INR(activeDebts.reduce((s, d) => s + (d.monthlyPayment || 0), 0))}</strong></td></tr>` || `<tr><td colspan="2">No active debts.</td></tr>`;
+  renderEmiOutflowTable(debts.filter(isActive));
 
   document.getElementById("bNeeds").value = cashflow.budgetSplit.needs;
   document.getElementById("bSavings").value = cashflow.budgetSplit.savings;
@@ -549,6 +562,43 @@ function renderCashflowView() {
   renderMonthlyLogTable(logs);
   renderBudgetVsActualChart(latest);
   renderCashflowTrendChart(logs);
+}
+
+function renderEmiOutflowTable(activeDebts) {
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const rows = activeDebts.map((d) => {
+    const history = [...(d.paymentHistory || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+    const lastPayment = history[0];
+    const paymentsThisMonth = (d.paymentHistory || []).filter((p) => p.month === currentMonth);
+    const expected = d.monthlyPayment || 0;
+
+    let statusHtml;
+    if (paymentsThisMonth.length === 0) {
+      statusHtml = `<span class="hint">Not detected yet</span>`;
+    } else {
+      const totalThisMonth = paymentsThisMonth.reduce((s, p) => s + p.amount, 0);
+      const tolerance = Math.max(expected * 0.05, 100);
+      if (Math.abs(totalThisMonth - expected) > tolerance) {
+        statusHtml = `<span class="negative">Amount mismatch (${INR(totalThisMonth)} vs expected ${INR(expected)})</span>`;
+      } else {
+        statusHtml = `<span class="positive">Paid &#10003;</span>`;
+      }
+    }
+
+    return `<tr>
+      <td>${escapeHtml(d.name)}</td>
+      <td>${INR(expected)}</td>
+      <td>${lastPayment ? `${INR(lastPayment.amount)} on ${lastPayment.date}` : "-"}</td>
+      <td>${statusHtml}</td>
+    </tr>`;
+  });
+  if (activeDebts.length === 0) {
+    document.getElementById("emiOutflowBody").innerHTML = `<tr><td colspan="4">No active debts.</td></tr>`;
+    return;
+  }
+  const total = activeDebts.reduce((s, d) => s + (d.monthlyPayment || 0), 0);
+  document.getElementById("emiOutflowBody").innerHTML =
+    rows.join("") + `<tr><td><strong>Total</strong></td><td><strong>${INR(total)}</strong></td><td></td><td></td></tr>`;
 }
 
 function renderAccountsPanel() {
@@ -576,15 +626,17 @@ function renderAccountsPanel() {
 function renderRecurringTable() {
   document.getElementById("recurringTableBody").innerHTML =
     cashflow.recurringExpenses
-      .map(
-        (r) => `<tr data-id="${r.id}">
+      .map((r) => {
+        const linkedDebt = r.linkedDebtId ? debts.find((d) => d.id === r.linkedDebtId) : null;
+        return `<tr data-id="${r.id}">
           <td>${escapeHtml(r.name)}</td>
           <td>${r.category}</td>
           <td>${INR(r.typicalAmount)}</td>
+          <td>${linkedDebt ? escapeHtml(linkedDebt.name) : "-"}</td>
           <td><button class="row-edit recurring-delete" data-id="${r.id}">Delete</button></td>
-        </tr>`
-      )
-      .join("") || `<tr><td colspan="4">No templates yet.</td></tr>`;
+        </tr>`;
+      })
+      .join("") || `<tr><td colspan="5">No templates yet.</td></tr>`;
 }
 
 function renderMonthlyLogTable(logs) {
@@ -756,11 +808,35 @@ function guessTypeForDescription(description, fallbackType) {
   return fallbackType;
 }
 
+function guessLinkedDebtForDescription(description) {
+  const key = normalizeDescriptionKey(description);
+  if (key) {
+    const learnedKeys = Object.keys(cashflow.categoryMappings).sort((a, b) => b.length - a.length);
+    for (const k of learnedKeys) {
+      if (k && (key.includes(k) || k.includes(key)) && cashflow.categoryMappings[k].linkedDebtId) {
+        return cashflow.categoryMappings[k].linkedDebtId;
+      }
+    }
+  }
+  const desc = (description || "").toLowerCase();
+  const recMatch = cashflow.recurringExpenses.find(
+    (r) => r.linkedDebtId && (desc.includes(r.name.toLowerCase()) || r.name.toLowerCase().includes(desc))
+  );
+  if (recMatch) return recMatch.linkedDebtId;
+  const debtMatch = debts.find((d) => desc.includes(d.name.toLowerCase()) || d.name.toLowerCase().includes(desc));
+  return debtMatch ? debtMatch.id : "";
+}
+
 function learnFromTransactions(transactions) {
   for (const t of transactions) {
     const key = normalizeDescriptionKey(t.description);
     if (!key) continue;
-    cashflow.categoryMappings[key] = { category: t.category, type: t.type };
+    const existing = cashflow.categoryMappings[key] || {};
+    cashflow.categoryMappings[key] = {
+      category: t.category,
+      type: t.type,
+      linkedDebtId: t.linkedDebtId || existing.linkedDebtId || "",
+    };
   }
 }
 
@@ -803,6 +879,7 @@ async function handleBankStatementFile(file) {
         amount: Number(t.amount) || 0,
         type: guessTypeForDescription(t.description, aiType),
         category: guessCategoryForDescription(t.description),
+        linkedDebtId: guessLinkedDebtForDescription(t.description),
         include: true,
       };
     });
@@ -846,6 +923,10 @@ function renderBankTxReviewTable() {
           <option value="savings" ${t.category === "savings" ? "selected" : ""}>Savings</option>
           <option value="wants" ${t.category === "wants" ? "selected" : ""}>Wants</option>
         </select></td>
+        <td><select class="btLinkedDebt" data-id="${t.id}" ${t.type === "credit" ? "disabled" : ""}>
+          <option value="">Not a loan EMI</option>
+          ${debts.map((d) => `<option value="${d.id}" ${t.linkedDebtId === d.id ? "selected" : ""}>${escapeHtml(d.name)}</option>`).join("")}
+        </select></td>
       </tr>`
     )
     .join("");
@@ -884,6 +965,10 @@ function syncPendingBankTxFromTable() {
   document.querySelectorAll(".btCategory").forEach((el) => {
     const t = pendingBankTransactions.find((x) => x.id === el.dataset.id);
     if (t) t.category = el.value;
+  });
+  document.querySelectorAll(".btLinkedDebt").forEach((el) => {
+    const t = pendingBankTransactions.find((x) => x.id === el.dataset.id);
+    if (t) t.linkedDebtId = el.value;
   });
 }
 
@@ -935,6 +1020,20 @@ function saveBankStatementReview() {
   cashflow.monthlyLogs = cashflow.monthlyLogs.filter((l) => l.month !== month);
   cashflow.monthlyLogs.push({ id: "log-" + Date.now(), month, income, expenses });
 
+  for (const t of included) {
+    if (t.type !== "debit" || !t.linkedDebtId) continue;
+    const debt = debts.find((d) => d.id === t.linkedDebtId);
+    if (!debt) continue;
+    if (!Array.isArray(debt.paymentHistory)) debt.paymentHistory = [];
+    debt.paymentHistory.push({
+      date: t.date,
+      amount: t.amount,
+      month,
+      description: t.description,
+      uploadedAt: new Date().toISOString(),
+    });
+  }
+
   const acct = upsertBankAccount(accountMeta);
 
   cashflow.bankStatements.push({
@@ -951,6 +1050,7 @@ function saveBankStatementReview() {
   pendingBankTransactions = [];
   pendingBankAccountMeta = { bankName: "", accountNumber: "", accountType: "", closingBalance: null };
   renderCashflowView();
+  renderDebtView();
   renderNetWorth();
 }
 
@@ -975,6 +1075,10 @@ function openRecurringModal() {
   document.getElementById("rName").value = "";
   document.getElementById("rCategory").value = "needs";
   document.getElementById("rAmount").value = "";
+  const select = document.getElementById("rLinkedDebt");
+  select.innerHTML =
+    `<option value="">Not a loan EMI</option>` +
+    debts.map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("");
   document.getElementById("recurringModal").hidden = false;
 }
 
@@ -1522,6 +1626,7 @@ function bindEvents() {
       name: document.getElementById("rName").value.trim(),
       category: document.getElementById("rCategory").value,
       typicalAmount: Number(document.getElementById("rAmount").value) || 0,
+      linkedDebtId: document.getElementById("rLinkedDebt").value,
     });
     saveData();
     closeRecurringModal();
@@ -1579,6 +1684,7 @@ function bindEvents() {
     document.querySelectorAll(".btType").forEach((el) => {
       const row = el.closest("tr");
       row.querySelector(".btCategory").disabled = el.value === "credit";
+      row.querySelector(".btLinkedDebt").disabled = el.value === "credit";
     });
   });
 

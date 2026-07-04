@@ -150,10 +150,11 @@
 
     <section class="panel">
       <h2>This Month's Known EMI Outflows</h2>
-      <p class="hint">Pulled live from your active debts in Debt Management &mdash; nothing to maintain twice.</p>
+      <p class="hint">Expected amounts come from Debt Management. Status is confirmed by linking bank statement
+        transactions to a debt when uploading &mdash; see "Linked Debt" when reviewing a statement below.</p>
       <div class="table-wrap">
         <table id="emiOutflowTable">
-          <thead><tr><th>Debt</th><th>Monthly Payment</th></tr></thead>
+          <thead><tr><th>Debt</th><th>Expected Monthly</th><th>Last Payment Detected</th><th>This Month's Status</th></tr></thead>
           <tbody id="emiOutflowBody"></tbody>
         </table>
       </div>
@@ -190,7 +191,7 @@
       <p class="hint">Quick-add these when logging a month. Seeded from your historical monthly expenses &mdash; edit amounts/categories as needed.</p>
       <div class="table-wrap">
         <table id="recurringTable">
-          <thead><tr><th>Name</th><th>Category</th><th>Typical Amount</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Category</th><th>Typical Amount</th><th>Linked Debt</th><th></th></tr></thead>
           <tbody id="recurringTableBody"></tbody>
         </table>
       </div>
@@ -218,7 +219,7 @@
         <div id="btSummary" class="hint"></div>
         <div class="table-wrap">
           <table id="btTransactionTable">
-            <thead><tr><th>Include</th><th>Date</th><th>Description</th><th>Amount (&#8377;)</th><th>Type</th><th>Category</th></tr></thead>
+            <thead><tr><th>Include</th><th>Date</th><th>Description</th><th>Amount (&#8377;)</th><th>Type</th><th>Category</th><th>Linked Debt (if a loan EMI)</th></tr></thead>
             <tbody id="btTransactionTableBody"></tbody>
           </table>
         </div>
@@ -380,6 +381,7 @@
       <label>Pending EMIs <input id="fEmis" type="number" min="0" step="1" /></label>
       <label>Interest Rate % (optional) <input id="fRate" type="number" min="0" step="0.1" /></label>
       <div id="fStatementHistory" class="statement-mini-history"></div>
+      <div id="fPaymentHistory" class="statement-mini-history"></div>
       <div class="modal-actions">
         <button type="button" id="btnDeleteDebt" class="btn danger" hidden>Delete</button>
         <button type="button" id="btnCancelModal" class="btn">Cancel</button>
@@ -434,6 +436,11 @@
         </select>
       </label>
       <label>Typical Amount (&#8377;) <input required id="rAmount" type="number" min="0" step="1" /></label>
+      <label>Linked Debt (if this is a loan EMI)
+        <select id="rLinkedDebt">
+          <option value="">Not a loan EMI</option>
+        </select>
+      </label>
       <div class="modal-actions">
         <button type="button" id="btnCancelRecurringModal" class="btn">Cancel</button>
         <button type="submit" class="btn primary">Save</button>
