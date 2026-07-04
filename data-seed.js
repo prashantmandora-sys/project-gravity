@@ -36,3 +36,42 @@ const DEBT_SEED = [
   ...d,
   completionPct: d.totalAmount > 0 ? Math.max(0, Math.min(1, (d.totalAmount - d.pendingAmount) / d.totalAmount)) : 1
 }));
+
+// Seed data imported from "My Finances.xlsx" -> Investments sheet (FY23-24 + FY24-25 contributions summed).
+// Current Value defaults to invested amount since the sheet has no market-value column — update it as you check actual NAV/statements.
+const INVESTMENT_SEED = [
+  { name: "Quant ELSS Tax Saver Fund Direct Growth", type: "Mutual Fund - ELSS", investedAmount: 20500, investmentDate: "2024-01-22", lockInPeriod: "3 Years" },
+  { name: "Bandhan ELSS Tax Saver Fund Direct Plan Growth", type: "Mutual Fund - ELSS", investedAmount: 10500, investmentDate: "2024-01-22", lockInPeriod: "3 Years" },
+  { name: "Bandhan Tax Advantage (ICICI)", type: "Mutual Fund - ELSS", investedAmount: 6000, investmentDate: "2024-03-22", lockInPeriod: "3 Years" },
+  { name: "HDFC ELSS Tax Saver Direct Plan Growth", type: "Mutual Fund - ELSS", investedAmount: 11000, investmentDate: "2024-01-30", lockInPeriod: "3 Years" },
+  { name: "SBI Long Term Equity Fund Direct Plan Growth", type: "Mutual Fund - ELSS", investedAmount: 21000, investmentDate: "2024-01-30", lockInPeriod: "3 Years" },
+  { name: "Kotak ELSS Tax Saver Fund Direct Growth", type: "Mutual Fund - ELSS", investedAmount: 11000, investmentDate: "2024-01-30", lockInPeriod: "3 Years" },
+  { name: "Mirae Asset ELSS Tax Saver Fund Direct Growth", type: "Mutual Fund - ELSS", investedAmount: 13000, investmentDate: "2024-01-30", lockInPeriod: "3 Years" },
+  { name: "Tata ELSS Tax Saver Fund Direct Growth", type: "Mutual Fund - ELSS", investedAmount: 11000, investmentDate: "2024-01-30", lockInPeriod: "3 Years" },
+  { name: "LIC", type: "Insurance", investedAmount: 49296, investmentDate: "2023-04-01", lockInPeriod: "Long Term" },
+  { name: "Life Insurance - ICICI", type: "Insurance", investedAmount: 40800, investmentDate: "2023-04-01", lockInPeriod: "Long Term" },
+  { name: "EPF", type: "Retirement - EPF", investedAmount: 43200, investmentDate: "2023-04-01", lockInPeriod: "Long Term" },
+].map((inv, i) => ({
+  id: `inv-seed-${i + 1}`,
+  notes: "",
+  currentValue: inv.investedAmount,
+  ...inv,
+}));
+
+// Seed budget rule + recurring expense templates from the "50-20-30" and "Monthly" sheets.
+// Historical month-by-month actuals weren't imported (source data had no years and inconsistent
+// categories month to month) -- these are quick-add templates for logging real months going forward.
+const CASHFLOW_SEED = {
+  budgetSplit: { needs: 50, savings: 20, wants: 30 },
+  recurringExpenses: [
+    { name: "HDFC EMI", category: "needs", typicalAmount: 7000 },
+    { name: "HDFC Credit Card", category: "wants", typicalAmount: 3100 },
+    { name: "ICICI Credit Card", category: "wants", typicalAmount: 11000 },
+    { name: "CashE EMI", category: "needs", typicalAmount: 6666 },
+    { name: "Home", category: "needs", typicalAmount: 15000 },
+    { name: "LIC", category: "savings", typicalAmount: 2000 },
+    { name: "APY", category: "savings", typicalAmount: 300 },
+    { name: "Gym Fees", category: "wants", typicalAmount: 2000 },
+  ].map((r, i) => ({ id: `rec-seed-${i + 1}`, ...r })),
+  monthlyLogs: [],
+};

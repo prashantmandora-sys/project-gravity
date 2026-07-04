@@ -1,24 +1,61 @@
 const STORAGE_KEY = "debtPortalData";
 const INR = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
 
-let debts = loadData();
+let debts, cashflow, investments;
+loadData();
+
 let currentFilter = "all";
 let lastSimulation = null;
-let paidPendingChart, byDebtChart, simChart;
+let paidPendingChart, byDebtChart, simChart, budgetVsActualChart, cashflowTrendChart, allocationChart, investedVsCurrentChart;
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------- Storage ----------
 
 function loadData() {
   const raw = localStorage.getItem(STORAGE_KEY);
-  const parsed = raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(DEBT_SEED));
-  if (!raw) localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-  parsed.forEach((d) => {
+  let parsed;
+  if (!raw) {
+    parsed = {
+      debts: JSON.parse(JSON.stringify(DEBT_SEED)),
+      cashflow: JSON.parse(JSON.stringify(CASHFLOW_SEED)),
+      investments: JSON.parse(JSON.stringify(INVESTMENT_SEED)),
+    };
+  } else {
+    const data = JSON.parse(raw);
+    if (Array.isArray(data)) {
+      // Migrating from the pre-multi-view schema, where the root was just the debts array.
+      parsed = { debts: data, cashflow: JSON.parse(JSON.stringify(CASHFLOW_SEED)), investments: JSON.parse(JSON.stringify(INVESTMENT_SEED)) };
+    } else {
+      parsed = {
+        debts: data.debts || [],
+        cashflow: data.cashflow || JSON.parse(JSON.stringify(CASHFLOW_SEED)),
+        investments: data.investments || JSON.parse(JSON.stringify(INVESTMENT_SEED)),
+      };
+    }
+  }
+
+  parsed.debts.forEach((d) => {
     if (!Array.isArray(d.statements)) d.statements = [];
     if (typeof d.loanNumber !== "string") d.loanNumber = "";
   });
-  return parsed;
+  if (!parsed.cashflow.budgetSplit) parsed.cashflow.budgetSplit = { needs: 50, savings: 20, wants: 30 };
+  if (!Array.isArray(parsed.cashflow.recurringExpenses)) parsed.cashflow.recurringExpenses = [];
+  if (!Array.isArray(parsed.cashflow.monthlyLogs)) parsed.cashflow.monthlyLogs = [];
+  parsed.investments.forEach((inv) => {
+    if (typeof inv.currentValue !== "number") inv.currentValue = inv.investedAmount;
+  });
+
+  debts = parsed.debts;
+  cashflow = parsed.cashflow;
+  investments = parsed.investments;
+  saveData();
 }
 
 function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(debts));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ debts, cashflow, investments }));
 }
 
 function recalc(d) {
@@ -30,7 +67,39 @@ function recalc(d) {
 
 function isActive(d) { return d.pendingAmount > 0; }
 
-function render() {
+// ---------- Tab Navigation ----------
+
+function switchView(view) {
+  document.querySelectorAll(".view").forEach((el) => (el.hidden = el.id !== `view-${view}`));
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  renderAll();
+}
+
+function renderAll() {
+  renderNetWorth();
+  renderDebtView();
+  renderCashflowView();
+  renderInvestmentView();
+}
+
+function renderNetWorth() {
+  const totalPendingDebt = debts.reduce((s, d) => s + d.pendingAmount, 0);
+  const totalInvested = investments.reduce((s, i) => s + i.investedAmount, 0);
+  const totalCurrentValue = investments.reduce((s, i) => s + i.currentValue, 0);
+  const netWorth = totalCurrentValue - totalPendingDebt;
+
+  document.getElementById("networthStrip").innerHTML = `
+    <div class="nw-item"><span class="nw-label">Net Worth</span><span class="nw-value ${netWorth >= 0 ? "positive" : "negative"}">${INR(netWorth)}</span></div>
+    <div class="nw-item"><span class="nw-label">Investments</span><span class="nw-value">${INR(totalCurrentValue)}</span></div>
+    <div class="nw-item"><span class="nw-label">Pending Debt</span><span class="nw-value">${INR(totalPendingDebt)}</span></div>
+  `;
+}
+
+// ================================================================
+// DEBT MANAGEMENT VIEW
+// ================================================================
+
+function renderDebtView() {
   renderSummary();
   renderTable();
   renderCharts();
@@ -77,10 +146,6 @@ function renderTable() {
     })
     .join("");
   document.getElementById("debtTableBody").innerHTML = rows || `<tr><td colspan="9">No debts in this view.</td></tr>`;
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 function renderCharts() {
@@ -154,7 +219,6 @@ function simulatePayoff(strategy, extraPayment) {
 
   while (active.some((d) => d.balance > 0.01) && month < MAX_MONTHS) {
     month++;
-    let freedMinPayments = 0;
     for (const d of active) {
       if (d.balance <= 0) continue;
       const monthlyRate = d.interestRate / 100 / 12;
@@ -373,7 +437,7 @@ function saveStatementReview() {
   document.getElementById("statementReview").hidden = true;
   document.getElementById("statementFile").value = "";
   pendingStatement = null;
-  render();
+  renderAll();
 }
 
 function renderStatementHistoryTable() {
@@ -400,7 +464,7 @@ function renderStatementHistoryTable() {
       .join("") || `<tr><td colspan="7">No statements uploaded yet.</td></tr>`;
 }
 
-// ---------- Modal ----------
+// ---------- Debt Modal ----------
 
 function openModal(debt) {
   const modal = document.getElementById("debtModal");
@@ -436,7 +500,368 @@ function closeModal() {
   document.getElementById("debtModal").hidden = true;
 }
 
+// ================================================================
+// CASHFLOW MANAGEMENT VIEW
+// ================================================================
+
+function categorizeAmounts(expenses) {
+  const totals = { needs: 0, savings: 0, wants: 0 };
+  for (const e of expenses) {
+    if (totals[e.category] != null) totals[e.category] += e.amount;
+  }
+  return totals;
+}
+
+function renderCashflowView() {
+  const logs = [...cashflow.monthlyLogs].sort((a, b) => a.month.localeCompare(b.month));
+  const latest = logs[logs.length - 1];
+
+  const latestIncome = latest ? latest.income : 0;
+  const latestExpenseTotal = latest ? latest.expenses.reduce((s, e) => s + e.amount, 0) : 0;
+  const latestNet = latestIncome - latestExpenseTotal;
+  const savingsRate = latestIncome > 0 ? (latestNet / latestIncome) * 100 : 0;
+
+  document.getElementById("cashflowSummaryGrid").innerHTML = [
+    ["Months Logged", cashflow.monthlyLogs.length],
+    ["Latest Income", INR(latestIncome)],
+    ["Latest Expenses", INR(latestExpenseTotal)],
+    ["Latest Net Cashflow", INR(latestNet)],
+    ["Savings Rate", savingsRate.toFixed(1) + "%"],
+    ["Budget Rule", `${cashflow.budgetSplit.needs}/${cashflow.budgetSplit.savings}/${cashflow.budgetSplit.wants}`],
+  ].map(([label, value]) => `<div class="summary-card"><div class="label">${label}</div><div class="value">${value}</div></div>`).join("");
+
+  const activeDebts = debts.filter(isActive);
+  document.getElementById("emiOutflowBody").innerHTML =
+    activeDebts.map((d) => `<tr><td>${escapeHtml(d.name)}</td><td>${INR(d.monthlyPayment || 0)}</td></tr>`).join("") +
+    `<tr><td><strong>Total</strong></td><td><strong>${INR(activeDebts.reduce((s, d) => s + (d.monthlyPayment || 0), 0))}</strong></td></tr>` || `<tr><td colspan="2">No active debts.</td></tr>`;
+
+  document.getElementById("bNeeds").value = cashflow.budgetSplit.needs;
+  document.getElementById("bSavings").value = cashflow.budgetSplit.savings;
+  document.getElementById("bWants").value = cashflow.budgetSplit.wants;
+
+  renderRecurringTable();
+  renderMonthlyLogTable(logs);
+  renderBudgetVsActualChart(latest);
+  renderCashflowTrendChart(logs);
+}
+
+function renderRecurringTable() {
+  document.getElementById("recurringTableBody").innerHTML =
+    cashflow.recurringExpenses
+      .map(
+        (r) => `<tr data-id="${r.id}">
+          <td>${escapeHtml(r.name)}</td>
+          <td>${r.category}</td>
+          <td>${INR(r.typicalAmount)}</td>
+          <td><button class="row-edit recurring-delete" data-id="${r.id}">Delete</button></td>
+        </tr>`
+      )
+      .join("") || `<tr><td colspan="4">No templates yet.</td></tr>`;
+}
+
+function renderMonthlyLogTable(logs) {
+  const sorted = [...logs].reverse();
+  document.getElementById("monthlyLogTableBody").innerHTML =
+    sorted
+      .map((log) => {
+        const expenseTotal = log.expenses.reduce((s, e) => s + e.amount, 0);
+        const cats = categorizeAmounts(log.expenses);
+        return `<tr data-id="${log.id}">
+          <td>${log.month}</td>
+          <td>${INR(log.income)}</td>
+          <td>${INR(expenseTotal)}</td>
+          <td>${INR(log.income - expenseTotal)}</td>
+          <td>${INR(cats.needs)}</td>
+          <td>${INR(cats.savings)}</td>
+          <td>${INR(cats.wants)}</td>
+          <td><button class="row-edit month-log-delete" data-id="${log.id}">Delete</button></td>
+        </tr>`;
+      })
+      .join("") || `<tr><td colspan="8">No months logged yet.</td></tr>`;
+}
+
+function renderBudgetVsActualChart(latest) {
+  const ctx = document.getElementById("chartBudgetVsActual");
+  if (budgetVsActualChart) budgetVsActualChart.destroy();
+
+  const income = latest ? latest.income : 0;
+  const targetNeeds = (income * cashflow.budgetSplit.needs) / 100;
+  const targetSavings = (income * cashflow.budgetSplit.savings) / 100;
+  const targetWants = (income * cashflow.budgetSplit.wants) / 100;
+  const actual = latest ? categorizeAmounts(latest.expenses) : { needs: 0, savings: 0, wants: 0 };
+
+  budgetVsActualChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: ["Needs", "Savings", "Wants"],
+      datasets: [
+        { label: "Target", data: [targetNeeds, targetSavings, targetWants], backgroundColor: "#4f8cff" },
+        { label: "Actual", data: [actual.needs, actual.savings, actual.wants], backgroundColor: "#22c55e" },
+      ],
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#e7ebf3" } } },
+      scales: {
+        x: { ticks: { color: "#8a93a6" }, grid: { display: false } },
+        y: { ticks: { color: "#8a93a6" }, grid: { color: "#262e42" } },
+      },
+    },
+  });
+}
+
+function renderCashflowTrendChart(logs) {
+  const ctx = document.getElementById("chartCashflowTrend");
+  if (cashflowTrendChart) cashflowTrendChart.destroy();
+  cashflowTrendChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: logs.map((l) => l.month),
+      datasets: [
+        { label: "Net Cashflow", data: logs.map((l) => l.income - l.expenses.reduce((s, e) => s + e.amount, 0)), borderColor: "#22c55e", tension: 0.15 },
+      ],
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#e7ebf3" } } },
+      scales: {
+        x: { ticks: { color: "#8a93a6" }, grid: { color: "#262e42" } },
+        y: { ticks: { color: "#8a93a6" }, grid: { color: "#262e42" } },
+      },
+    },
+  });
+}
+
+async function getCashflowAiCommentary() {
+  const box = document.getElementById("cashflowAiCommentary");
+  box.hidden = false;
+  box.className = "ai-commentary loading";
+  box.textContent = "Asking AI to review your cashflow...";
+
+  const logs = [...cashflow.monthlyLogs].sort((a, b) => a.month.localeCompare(b.month));
+  try {
+    const res = await fetch("/api/cashflow-insights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        budgetSplit: cashflow.budgetSplit,
+        monthlyLogs: logs.map((l) => ({ month: l.month, income: l.income, expenses: l.expenses })),
+        upcomingEmiOutflows: debts.filter(isActive).map((d) => ({ name: d.name, monthlyPayment: d.monthlyPayment })),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Request failed");
+    box.className = "ai-commentary";
+    box.textContent = data.commentary;
+  } catch (err) {
+    box.className = "ai-commentary error";
+    box.textContent = "Couldn't get AI insights: " + err.message + "\n\n(This requires the /api/cashflow-insights serverless function to be deployed with a GEMINI_API_KEY set.)";
+  }
+}
+
+// ---------- Cashflow Modals ----------
+
+function openRecurringModal() {
+  document.getElementById("rName").value = "";
+  document.getElementById("rCategory").value = "needs";
+  document.getElementById("rAmount").value = "";
+  document.getElementById("recurringModal").hidden = false;
+}
+
+function closeRecurringModal() {
+  document.getElementById("recurringModal").hidden = true;
+}
+
+function openBudgetSplitAwareLogModal() {
+  const list = document.getElementById("mExpenseList");
+  list.innerHTML = cashflow.recurringExpenses
+    .map(
+      (r) => `<label class="expense-row">
+        <input type="checkbox" class="mExpenseCheck" data-id="${r.id}" checked />
+        <span class="expense-name">${escapeHtml(r.name)} <em>(${r.category})</em></span>
+        <input type="number" class="mExpenseAmount" data-id="${r.id}" value="${r.typicalAmount}" min="0" step="1" />
+      </label>`
+    )
+    .join("");
+  document.getElementById("mMonth").value = "";
+  document.getElementById("mIncome").value = "";
+  document.getElementById("monthLogModal").hidden = false;
+}
+
+function closeMonthLogModal() {
+  document.getElementById("monthLogModal").hidden = true;
+}
+
+// ================================================================
+// INVESTMENT MANAGEMENT VIEW
+// ================================================================
+
+function renderInvestmentView() {
+  const totalInvested = investments.reduce((s, i) => s + i.investedAmount, 0);
+  const totalCurrent = investments.reduce((s, i) => s + i.currentValue, 0);
+  const gain = totalCurrent - totalInvested;
+  const gainPct = totalInvested > 0 ? (gain / totalInvested) * 100 : 0;
+
+  document.getElementById("investmentSummaryGrid").innerHTML = [
+    ["Holdings", investments.length],
+    ["Total Invested", INR(totalInvested)],
+    ["Current Value", INR(totalCurrent)],
+    ["Gain / Loss", INR(gain)],
+    ["Return %", gainPct.toFixed(1) + "%"],
+  ].map(([label, value]) => `<div class="summary-card"><div class="label">${label}</div><div class="value">${value}</div></div>`).join("");
+
+  document.getElementById("investmentTableBody").innerHTML =
+    investments
+      .map((inv) => {
+        const g = inv.currentValue - inv.investedAmount;
+        const gPct = inv.investedAmount > 0 ? (g / inv.investedAmount) * 100 : 0;
+        return `<tr data-id="${inv.id}">
+          <td>${escapeHtml(inv.name)}</td>
+          <td>${escapeHtml(inv.type || "")}</td>
+          <td>${INR(inv.investedAmount)}</td>
+          <td>${INR(inv.currentValue)}</td>
+          <td class="${g >= 0 ? "positive" : "negative"}">${INR(g)} (${gPct.toFixed(1)}%)</td>
+          <td>${inv.investmentDate || "-"}</td>
+          <td>${escapeHtml(inv.lockInPeriod || "-")}</td>
+          <td><button class="row-edit investment-edit" data-id="${inv.id}">Edit</button></td>
+        </tr>`;
+      })
+      .join("") || `<tr><td colspan="8">No investments yet.</td></tr>`;
+
+  renderAllocationChart();
+  renderInvestedVsCurrentChart();
+}
+
+function renderAllocationChart() {
+  const ctx = document.getElementById("chartAllocation");
+  if (allocationChart) allocationChart.destroy();
+
+  const byType = {};
+  for (const inv of investments) {
+    const key = inv.type || "Other";
+    byType[key] = (byType[key] || 0) + inv.currentValue;
+  }
+  const palette = ["#4f8cff", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#06b6d4", "#eab308"];
+
+  allocationChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: Object.keys(byType),
+      datasets: [{ data: Object.values(byType), backgroundColor: palette }],
+    },
+    options: { plugins: { legend: { labels: { color: "#e7ebf3" } } } },
+  });
+}
+
+function renderInvestedVsCurrentChart() {
+  const ctx = document.getElementById("chartInvestedVsCurrent");
+  if (investedVsCurrentChart) investedVsCurrentChart.destroy();
+
+  investedVsCurrentChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: investments.map((i) => i.name),
+      datasets: [
+        { label: "Invested", data: investments.map((i) => i.investedAmount), backgroundColor: "#4f8cff" },
+        { label: "Current", data: investments.map((i) => i.currentValue), backgroundColor: "#22c55e" },
+      ],
+    },
+    options: {
+      indexAxis: "y",
+      plugins: { legend: { labels: { color: "#e7ebf3" } } },
+      scales: {
+        x: { ticks: { color: "#8a93a6" }, grid: { color: "#262e42" } },
+        y: { ticks: { color: "#e7ebf3" }, grid: { display: false } },
+      },
+    },
+  });
+}
+
+async function getInvestmentAiCommentary() {
+  const box = document.getElementById("investmentAiCommentary");
+  box.hidden = false;
+  box.className = "ai-commentary loading";
+  box.textContent = "Asking AI to review your portfolio...";
+
+  try {
+    const res = await fetch("/api/investment-insights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        investments: investments.map((i) => ({
+          name: i.name, type: i.type, investedAmount: i.investedAmount,
+          currentValue: i.currentValue, investmentDate: i.investmentDate, lockInPeriod: i.lockInPeriod,
+        })),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Request failed");
+    box.className = "ai-commentary";
+    box.textContent = data.commentary;
+  } catch (err) {
+    box.className = "ai-commentary error";
+    box.textContent = "Couldn't get AI insights: " + err.message + "\n\n(This requires the /api/investment-insights serverless function to be deployed with a GEMINI_API_KEY set.)";
+  }
+}
+
+// ---------- Investment Modal ----------
+
+function openInvestmentModal(inv) {
+  document.getElementById("investmentModalTitle").textContent = inv ? "Edit Investment" : "Add Investment";
+  document.getElementById("iId").value = inv ? inv.id : "";
+  document.getElementById("iName").value = inv ? inv.name : "";
+  document.getElementById("iType").value = inv ? inv.type || "" : "";
+  document.getElementById("iInvested").value = inv ? inv.investedAmount : "";
+  document.getElementById("iCurrent").value = inv ? inv.currentValue : "";
+  document.getElementById("iDate").value = inv ? inv.investmentDate || "" : "";
+  document.getElementById("iLockIn").value = inv ? inv.lockInPeriod || "" : "";
+  document.getElementById("iNotes").value = inv ? inv.notes || "" : "";
+  document.getElementById("btnDeleteInvestment").hidden = !inv;
+  document.getElementById("investmentModal").hidden = false;
+}
+
+function closeInvestmentModal() {
+  document.getElementById("investmentModal").hidden = true;
+}
+
+// ================================================================
+// EVENT BINDING
+// ================================================================
+
 function bindEvents() {
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => switchView(btn.dataset.view));
+  });
+
+  document.getElementById("btnExport").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify({ debts, cashflow, investments }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "financial-portal-export.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById("importFile").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        debts = parsed.map(recalc);
+      } else {
+        if (Array.isArray(parsed.debts)) debts = parsed.debts.map(recalc);
+        if (parsed.cashflow) cashflow = parsed.cashflow;
+        if (Array.isArray(parsed.investments)) investments = parsed.investments;
+      }
+      saveData();
+      renderAll();
+    } catch (err) {
+      alert("Import failed: " + err.message);
+    }
+  });
+
+  // ---- Debt view events ----
   document.getElementById("btnAddDebt").addEventListener("click", () => openModal(null));
   document.getElementById("btnCancelModal").addEventListener("click", closeModal);
 
@@ -465,7 +890,7 @@ function bindEvents() {
     }
     saveData();
     closeModal();
-    render();
+    renderAll();
   });
 
   document.getElementById("btnDeleteDebt").addEventListener("click", () => {
@@ -473,7 +898,7 @@ function bindEvents() {
     debts = debts.filter((d) => d.id !== id);
     saveData();
     closeModal();
-    render();
+    renderAll();
   });
 
   document.getElementById("debtTableBody").addEventListener("click", (e) => {
@@ -495,31 +920,6 @@ function bindEvents() {
   document.getElementById("btnSimulate").addEventListener("click", runSimulationUI);
   document.getElementById("btnAiCommentary").addEventListener("click", getAiCommentary);
 
-  document.getElementById("btnExport").addEventListener("click", () => {
-    const blob = new Blob([JSON.stringify(debts, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "debt-portal-export.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  });
-
-  document.getElementById("importFile").addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const text = await file.text();
-    try {
-      const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) throw new Error("Expected a JSON array of debts");
-      debts = parsed.map(recalc);
-      saveData();
-      render();
-    } catch (err) {
-      alert("Import failed: " + err.message);
-    }
-  });
-
   document.getElementById("statementFile").addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (file) handleStatementFile(file);
@@ -535,7 +935,120 @@ function bindEvents() {
     document.getElementById("statementFile").value = "";
     pendingStatement = null;
   });
+
+  // ---- Cashflow view events ----
+  document.getElementById("budgetSplitForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    cashflow.budgetSplit = {
+      needs: Number(document.getElementById("bNeeds").value) || 0,
+      savings: Number(document.getElementById("bSavings").value) || 0,
+      wants: Number(document.getElementById("bWants").value) || 0,
+    };
+    saveData();
+    renderCashflowView();
+  });
+
+  document.getElementById("btnAddRecurring").addEventListener("click", openRecurringModal);
+  document.getElementById("btnCancelRecurringModal").addEventListener("click", closeRecurringModal);
+
+  document.getElementById("recurringForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    cashflow.recurringExpenses.push({
+      id: "rec-" + Date.now(),
+      name: document.getElementById("rName").value.trim(),
+      category: document.getElementById("rCategory").value,
+      typicalAmount: Number(document.getElementById("rAmount").value) || 0,
+    });
+    saveData();
+    closeRecurringModal();
+    renderCashflowView();
+  });
+
+  document.getElementById("recurringTableBody").addEventListener("click", (e) => {
+    const btn = e.target.closest(".recurring-delete");
+    if (!btn) return;
+    cashflow.recurringExpenses = cashflow.recurringExpenses.filter((r) => r.id !== btn.dataset.id);
+    saveData();
+    renderCashflowView();
+  });
+
+  document.getElementById("btnAddMonthLog").addEventListener("click", openBudgetSplitAwareLogModal);
+  document.getElementById("btnCancelMonthLogModal").addEventListener("click", closeMonthLogModal);
+
+  document.getElementById("monthLogForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const month = document.getElementById("mMonth").value;
+    const income = Number(document.getElementById("mIncome").value) || 0;
+    const expenses = [];
+    document.querySelectorAll(".mExpenseCheck").forEach((cb) => {
+      if (!cb.checked) return;
+      const rec = cashflow.recurringExpenses.find((r) => r.id === cb.dataset.id);
+      const amountInput = document.querySelector(`.mExpenseAmount[data-id="${cb.dataset.id}"]`);
+      const amount = Number(amountInput.value) || 0;
+      if (rec) expenses.push({ name: rec.name, category: rec.category, amount });
+    });
+    cashflow.monthlyLogs = cashflow.monthlyLogs.filter((l) => l.month !== month);
+    cashflow.monthlyLogs.push({ id: "log-" + Date.now(), month, income, expenses });
+    saveData();
+    closeMonthLogModal();
+    renderCashflowView();
+  });
+
+  document.getElementById("monthlyLogTableBody").addEventListener("click", (e) => {
+    const btn = e.target.closest(".month-log-delete");
+    if (!btn) return;
+    cashflow.monthlyLogs = cashflow.monthlyLogs.filter((l) => l.id !== btn.dataset.id);
+    saveData();
+    renderCashflowView();
+  });
+
+  document.getElementById("btnCashflowAi").addEventListener("click", getCashflowAiCommentary);
+
+  // ---- Investment view events ----
+  document.getElementById("btnAddInvestment").addEventListener("click", () => openInvestmentModal(null));
+  document.getElementById("btnCancelInvestmentModal").addEventListener("click", closeInvestmentModal);
+
+  document.getElementById("investmentForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const id = document.getElementById("iId").value;
+    const payload = {
+      name: document.getElementById("iName").value.trim(),
+      type: document.getElementById("iType").value.trim(),
+      investedAmount: Number(document.getElementById("iInvested").value) || 0,
+      currentValue: Number(document.getElementById("iCurrent").value) || 0,
+      investmentDate: document.getElementById("iDate").value,
+      lockInPeriod: document.getElementById("iLockIn").value.trim(),
+      notes: document.getElementById("iNotes").value.trim(),
+    };
+    if (id) {
+      Object.assign(investments.find((i) => i.id === id), payload);
+    } else {
+      investments.push({ id: "inv-" + Date.now(), ...payload });
+    }
+    saveData();
+    closeInvestmentModal();
+    renderInvestmentView();
+    renderNetWorth();
+  });
+
+  document.getElementById("btnDeleteInvestment").addEventListener("click", () => {
+    const id = document.getElementById("iId").value;
+    investments = investments.filter((i) => i.id !== id);
+    saveData();
+    closeInvestmentModal();
+    renderInvestmentView();
+    renderNetWorth();
+  });
+
+  document.getElementById("investmentTableBody").addEventListener("click", (e) => {
+    const btn = e.target.closest(".investment-edit");
+    if (!btn) return;
+    const inv = investments.find((i) => i.id === btn.dataset.id);
+    if (inv) openInvestmentModal(inv);
+  });
+
+  document.getElementById("btnInvestmentAi").addEventListener("click", getInvestmentAiCommentary);
 }
 
 bindEvents();
-render();
+renderAll();

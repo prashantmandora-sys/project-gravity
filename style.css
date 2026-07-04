@@ -23,6 +23,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   padding: 16px 24px;
   border-bottom: 1px solid var(--panel-border);
 }
@@ -30,14 +32,43 @@ body {
 .topbar h1 { font-size: 20px; margin: 0; }
 .topbar-actions { display: flex; gap: 8px; }
 
+.networth-strip { display: flex; gap: 20px; flex-wrap: wrap; }
+.nw-item { display: flex; flex-direction: column; gap: 2px; }
+.nw-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.nw-value { font-size: 16px; font-weight: 600; }
+.nw-value.positive, .positive { color: var(--accent-2); }
+.nw-value.negative, .negative { color: var(--danger); }
+
+.tabnav {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--panel-border);
+  max-width: 1100px;
+  margin: 0 auto;
+}
+.tab-btn {
+  background: none; border: none; color: var(--muted); padding: 12px 16px;
+  font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent;
+}
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab-btn:hover { color: var(--text); }
+
 main {
   max-width: 1100px;
   margin: 0 auto;
   padding: 24px;
+}
+
+.view[hidden] { display: none; }
+.view {
   display: flex;
   flex-direction: column;
   gap: 24px;
 }
+
+.view-header { display: flex; align-items: center; justify-content: space-between; }
+.view-header h2 { margin: 0; font-size: 18px; }
 
 .btn {
   background: #232a3d;
@@ -162,3 +193,28 @@ tr:hover td { background: #1d2438; }
   padding: 8px 10px; border-radius: 8px;
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+#investmentForm, #recurringForm, #monthLogForm { display: flex; flex-direction: column; gap: 10px; }
+#investmentForm label, #recurringForm label, #monthLogForm label {
+  display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted);
+}
+#investmentForm input, #investmentForm select,
+#recurringForm input, #recurringForm select,
+#monthLogForm input {
+  background: #0e1420; border: 1px solid var(--panel-border); color: var(--text);
+  padding: 8px 10px; border-radius: 8px;
+}
+
+.modal-card-wide { max-width: 560px; }
+
+.expense-checklist {
+  display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto;
+  background: #0e1420; border: 1px solid var(--panel-border); border-radius: 8px; padding: 12px;
+}
+#monthLogForm .expense-row { display: flex; flex-direction: row; align-items: center; gap: 10px; font-size: 13px; }
+.expense-row .expense-name { flex: 1; }
+.expense-row .expense-name em { color: var(--muted); font-style: normal; font-size: 11px; }
+.expense-row input[type="number"] {
+  width: 110px; background: #171d2b; border: 1px solid var(--panel-border); color: var(--text);
+  padding: 6px 8px; border-radius: 6px;
+}

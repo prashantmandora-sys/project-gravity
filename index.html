@@ -3,122 +3,247 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Debt Freedom Portal</title>
+<title>Financial Command Center</title>
 <link rel="stylesheet" href="style.css" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
 </head>
 <body>
 <header class="topbar">
-  <h1>Debt Freedom Portal</h1>
+  <h1>Financial Command Center</h1>
+  <div class="networth-strip" id="networthStrip"></div>
   <div class="topbar-actions">
-    <button id="btnAddDebt" class="btn primary">+ Add Debt</button>
-    <button id="btnExport" class="btn">Export</button>
+    <button id="btnExport" class="btn">Export All</button>
     <label class="btn file-btn">Import<input type="file" id="importFile" accept="application/json" hidden /></label>
   </div>
 </header>
 
+<nav class="tabnav">
+  <button class="tab-btn active" data-view="debt">Debt Management</button>
+  <button class="tab-btn" data-view="cashflow">Cashflow Management</button>
+  <button class="tab-btn" data-view="investment">Investment Management</button>
+</nav>
+
 <main>
-  <section class="summary-grid" id="summaryGrid"></section>
+  <!-- ===================== DEBT MANAGEMENT VIEW ===================== -->
+  <section class="view" id="view-debt">
+    <div class="view-header">
+      <h2>Debt Management</h2>
+      <button id="btnAddDebt" class="btn primary">+ Add Debt</button>
+    </div>
 
-  <section class="panel">
-    <div class="panel-header">
-      <h2>Debts</h2>
-      <div class="filters">
-        <button class="filter-btn active" data-filter="all">All</button>
-        <button class="filter-btn" data-filter="active">Active</button>
-        <button class="filter-btn" data-filter="completed">Completed</button>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table id="debtTable">
-        <thead>
-          <tr>
-            <th>Name</th><th>Type</th><th>Total</th><th>Pending</th>
-            <th>Progress</th><th>Monthly</th><th>Rate %</th><th>EMIs Left</th><th></th>
-          </tr>
-        </thead>
-        <tbody id="debtTableBody"></tbody>
-      </table>
-    </div>
-  </section>
+    <section class="summary-grid" id="summaryGrid"></section>
 
-  <section class="charts-grid">
-    <div class="panel">
-      <h2>Paid vs Pending</h2>
-      <canvas id="chartPaidPending" height="220"></canvas>
-    </div>
-    <div class="panel">
-      <h2>Pending Balance by Debt</h2>
-      <canvas id="chartByDebt" height="220"></canvas>
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>Payoff Simulator</h2>
-    <p class="hint">Runs entirely in your browser using your active debts. "Rate %" is optional per debt &mdash;
-      fill it in for a true avalanche (highest-interest-first) order; without it, avalanche and snowball behave the same.</p>
-    <div class="simulator-controls">
-      <label>Strategy
-        <select id="simStrategy">
-          <option value="snowball">Snowball (smallest balance first)</option>
-          <option value="avalanche">Avalanche (highest interest first)</option>
-        </select>
-      </label>
-      <label>Extra monthly payment (&#8377;)
-        <input type="number" id="simExtra" min="0" step="500" value="0" />
-      </label>
-      <button id="btnSimulate" class="btn primary">Run Simulation</button>
-      <button id="btnAiCommentary" class="btn">Get AI Strategy Commentary</button>
-    </div>
-    <div id="simResults" class="sim-results" hidden>
-      <div class="sim-stats" id="simStats"></div>
-      <canvas id="chartSim" height="240"></canvas>
-      <ol id="simOrder" class="sim-order"></ol>
-    </div>
-    <div id="aiCommentary" class="ai-commentary" hidden></div>
-  </section>
-
-  <section class="panel">
-    <h2>Loan Statements</h2>
-    <p class="hint">Upload a loan statement PDF. Text is extracted in your browser, then AI reads out the loan number,
-      type, balance, EMI and due date so it can be logged against the right loan's history.</p>
-    <div class="simulator-controls">
-      <label class="btn file-btn">Upload Statement PDF<input type="file" id="statementFile" accept="application/pdf" hidden /></label>
-    </div>
-    <div id="statementStatus" class="hint" hidden></div>
-
-    <div id="statementReview" class="statement-review" hidden>
-      <h3>Extracted details &mdash; review before saving</h3>
-      <form id="statementForm">
-        <label>Loan Number <input id="sLoanNumber" type="text" /></label>
-        <label>Lender / Type <input id="sLoanType" type="text" /></label>
-        <label>Statement Date <input id="sStatementDate" type="date" /></label>
-        <label>Outstanding Balance (&#8377;) <input id="sBalance" type="number" step="1" /></label>
-        <label>EMI Amount (&#8377;) <input id="sEmi" type="number" step="1" /></label>
-        <label>Next Due Date <input id="sDueDate" type="date" /></label>
-        <label>Interest Rate % <input id="sRate" type="number" step="0.1" /></label>
-        <label>Match to Debt
-          <select id="sMatchDebt"></select>
-        </label>
-        <label class="checkbox-label"><input type="checkbox" id="sApplyToDebt" checked /> Update this debt's balance/EMI/rate with these values</label>
-        <div class="modal-actions">
-          <button type="button" id="btnCancelStatement" class="btn">Discard</button>
-          <button type="submit" class="btn primary">Save Activity</button>
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Debts</h2>
+        <div class="filters">
+          <button class="filter-btn active" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="active">Active</button>
+          <button class="filter-btn" data-filter="completed">Completed</button>
         </div>
-      </form>
+      </div>
+      <div class="table-wrap">
+        <table id="debtTable">
+          <thead>
+            <tr>
+              <th>Name</th><th>Type</th><th>Total</th><th>Pending</th>
+              <th>Progress</th><th>Monthly</th><th>Rate %</th><th>EMIs Left</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="debtTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="charts-grid">
+      <div class="panel">
+        <h2>Paid vs Pending</h2>
+        <canvas id="chartPaidPending" height="220"></canvas>
+      </div>
+      <div class="panel">
+        <h2>Pending Balance by Debt</h2>
+        <canvas id="chartByDebt" height="220"></canvas>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Payoff Simulator</h2>
+      <p class="hint">Runs entirely in your browser using your active debts. "Rate %" is optional per debt &mdash;
+        fill it in for a true avalanche (highest-interest-first) order; without it, avalanche and snowball behave the same.</p>
+      <div class="simulator-controls">
+        <label>Strategy
+          <select id="simStrategy">
+            <option value="snowball">Snowball (smallest balance first)</option>
+            <option value="avalanche">Avalanche (highest interest first)</option>
+          </select>
+        </label>
+        <label>Extra monthly payment (&#8377;)
+          <input type="number" id="simExtra" min="0" step="500" value="0" />
+        </label>
+        <button id="btnSimulate" class="btn primary">Run Simulation</button>
+        <button id="btnAiCommentary" class="btn">Get AI Strategy Commentary</button>
+      </div>
+      <div id="simResults" class="sim-results" hidden>
+        <div class="sim-stats" id="simStats"></div>
+        <canvas id="chartSim" height="240"></canvas>
+        <ol id="simOrder" class="sim-order"></ol>
+      </div>
+      <div id="aiCommentary" class="ai-commentary" hidden></div>
+    </section>
+
+    <section class="panel">
+      <h2>Loan Statements</h2>
+      <p class="hint">Upload a loan statement PDF. Text is extracted in your browser, then AI reads out the loan number,
+        type, balance, EMI and due date so it can be logged against the right loan's history.</p>
+      <div class="simulator-controls">
+        <label class="btn file-btn">Upload Statement PDF<input type="file" id="statementFile" accept="application/pdf" hidden /></label>
+      </div>
+      <div id="statementStatus" class="hint" hidden></div>
+
+      <div id="statementReview" class="statement-review" hidden>
+        <h3>Extracted details &mdash; review before saving</h3>
+        <form id="statementForm">
+          <label>Loan Number <input id="sLoanNumber" type="text" /></label>
+          <label>Lender / Type <input id="sLoanType" type="text" /></label>
+          <label>Statement Date <input id="sStatementDate" type="date" /></label>
+          <label>Outstanding Balance (&#8377;) <input id="sBalance" type="number" step="1" /></label>
+          <label>EMI Amount (&#8377;) <input id="sEmi" type="number" step="1" /></label>
+          <label>Next Due Date <input id="sDueDate" type="date" /></label>
+          <label>Interest Rate % <input id="sRate" type="number" step="0.1" /></label>
+          <label>Match to Debt
+            <select id="sMatchDebt"></select>
+          </label>
+          <label class="checkbox-label"><input type="checkbox" id="sApplyToDebt" checked /> Update this debt's balance/EMI/rate with these values</label>
+          <div class="modal-actions">
+            <button type="button" id="btnCancelStatement" class="btn">Discard</button>
+            <button type="submit" class="btn primary">Save Activity</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="table-wrap">
+        <table id="statementHistoryTable">
+          <thead>
+            <tr><th>Debt</th><th>Loan #</th><th>Statement Date</th><th>Balance</th><th>EMI</th><th>Next Due</th><th>Uploaded</th></tr>
+          </thead>
+          <tbody id="statementHistoryBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <!-- ===================== CASHFLOW MANAGEMENT VIEW ===================== -->
+  <section class="view" id="view-cashflow" hidden>
+    <div class="view-header">
+      <h2>Cashflow Management</h2>
+      <button id="btnAddMonthLog" class="btn primary">+ Log a Month</button>
     </div>
 
-    <div class="table-wrap">
-      <table id="statementHistoryTable">
-        <thead>
-          <tr><th>Debt</th><th>Loan #</th><th>Statement Date</th><th>Balance</th><th>EMI</th><th>Next Due</th><th>Uploaded</th></tr>
-        </thead>
-        <tbody id="statementHistoryBody"></tbody>
-      </table>
+    <section class="summary-grid" id="cashflowSummaryGrid"></section>
+
+    <section class="panel">
+      <h2>This Month's Known EMI Outflows</h2>
+      <p class="hint">Pulled live from your active debts in Debt Management &mdash; nothing to maintain twice.</p>
+      <div class="table-wrap">
+        <table id="emiOutflowTable">
+          <thead><tr><th>Debt</th><th>Monthly Payment</th></tr></thead>
+          <tbody id="emiOutflowBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="charts-grid">
+      <div class="panel">
+        <h2>Budget Rule vs Actual (latest month)</h2>
+        <canvas id="chartBudgetVsActual" height="220"></canvas>
+      </div>
+      <div class="panel">
+        <h2>Net Cashflow Trend</h2>
+        <canvas id="chartCashflowTrend" height="220"></canvas>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Budget Rule</h2>
+      </div>
+      <form id="budgetSplitForm" class="simulator-controls">
+        <label>Needs % <input id="bNeeds" type="number" min="0" max="100" /></label>
+        <label>Savings % <input id="bSavings" type="number" min="0" max="100" /></label>
+        <label>Wants % <input id="bWants" type="number" min="0" max="100" /></label>
+        <button type="submit" class="btn primary">Save Split</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Recurring Expense Templates</h2>
+        <button id="btnAddRecurring" class="btn">+ Add Template</button>
+      </div>
+      <p class="hint">Quick-add these when logging a month. Seeded from your historical monthly expenses &mdash; edit amounts/categories as needed.</p>
+      <div class="table-wrap">
+        <table id="recurringTable">
+          <thead><tr><th>Name</th><th>Category</th><th>Typical Amount</th><th></th></tr></thead>
+          <tbody id="recurringTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Monthly Logs</h2>
+        <button id="btnCashflowAi" class="btn">Get AI Cashflow Insights</button>
+      </div>
+      <div id="cashflowAiCommentary" class="ai-commentary" hidden></div>
+      <div class="table-wrap">
+        <table id="monthlyLogTable">
+          <thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Net</th><th>Needs</th><th>Savings</th><th>Wants</th><th></th></tr></thead>
+          <tbody id="monthlyLogTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <!-- ===================== INVESTMENT MANAGEMENT VIEW ===================== -->
+  <section class="view" id="view-investment" hidden>
+    <div class="view-header">
+      <h2>Investment Management</h2>
+      <button id="btnAddInvestment" class="btn primary">+ Add Investment</button>
     </div>
+
+    <section class="summary-grid" id="investmentSummaryGrid"></section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Holdings</h2>
+        <button id="btnInvestmentAi" class="btn">Get AI Portfolio Insights</button>
+      </div>
+      <div id="investmentAiCommentary" class="ai-commentary" hidden></div>
+      <div class="table-wrap">
+        <table id="investmentTable">
+          <thead>
+            <tr><th>Name</th><th>Type</th><th>Invested</th><th>Current Value</th><th>Gain/Loss</th><th>Since</th><th>Lock-in</th><th></th></tr>
+          </thead>
+          <tbody id="investmentTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="charts-grid">
+      <div class="panel">
+        <h2>Allocation by Type</h2>
+        <canvas id="chartAllocation" height="220"></canvas>
+      </div>
+      <div class="panel">
+        <h2>Invested vs Current Value</h2>
+        <canvas id="chartInvestedVsCurrent" height="220"></canvas>
+      </div>
+    </section>
   </section>
 </main>
+
+<!-- ===================== MODALS ===================== -->
 
 <div id="debtModal" class="modal" hidden>
   <div class="modal-card">
@@ -138,6 +263,64 @@
         <button type="button" id="btnDeleteDebt" class="btn danger" hidden>Delete</button>
         <button type="button" id="btnCancelModal" class="btn">Cancel</button>
         <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="investmentModal" class="modal" hidden>
+  <div class="modal-card">
+    <h2 id="investmentModalTitle">Add Investment</h2>
+    <form id="investmentForm">
+      <input type="hidden" id="iId" />
+      <label>Name <input required id="iName" type="text" /></label>
+      <label>Type <input id="iType" type="text" placeholder="Mutual Fund - ELSS, EPF, Insurance, Stock..." /></label>
+      <label>Invested Amount (&#8377;) <input required id="iInvested" type="number" min="0" step="1" /></label>
+      <label>Current Value (&#8377;) <input id="iCurrent" type="number" min="0" step="1" /></label>
+      <label>Investment Date <input id="iDate" type="date" /></label>
+      <label>Lock-in Period <input id="iLockIn" type="text" placeholder="e.g. 3 Years" /></label>
+      <label>Notes <input id="iNotes" type="text" /></label>
+      <div class="modal-actions">
+        <button type="button" id="btnDeleteInvestment" class="btn danger" hidden>Delete</button>
+        <button type="button" id="btnCancelInvestmentModal" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="recurringModal" class="modal" hidden>
+  <div class="modal-card">
+    <h2>Add Recurring Expense Template</h2>
+    <form id="recurringForm">
+      <label>Name <input required id="rName" type="text" /></label>
+      <label>Category
+        <select id="rCategory">
+          <option value="needs">Needs</option>
+          <option value="savings">Savings</option>
+          <option value="wants">Wants</option>
+        </select>
+      </label>
+      <label>Typical Amount (&#8377;) <input required id="rAmount" type="number" min="0" step="1" /></label>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelRecurringModal" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="monthLogModal" class="modal" hidden>
+  <div class="modal-card modal-card-wide">
+    <h2>Log a Month</h2>
+    <form id="monthLogForm">
+      <label>Month <input required id="mMonth" type="month" /></label>
+      <label>Income (&#8377;) <input required id="mIncome" type="number" min="0" step="1" /></label>
+      <div class="hint">Tick the expenses that applied this month and adjust amounts:</div>
+      <div id="mExpenseList" class="expense-checklist"></div>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelMonthLogModal" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Save Month</button>
       </div>
     </form>
   </div>
