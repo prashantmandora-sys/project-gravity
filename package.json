@@ -1,6 +1,6 @@
 {
-  "name": "debt-freedom-portal",
+  "name": "gravity",
   "version": "1.0.0",
   "private": true,
-  "description": "Static debt-tracking portal with a Vercel serverless AI commentary endpoint"
+  "description": "Gravity - personal finance portal (debt, cashflow, investment management) with Vercel serverless AI endpoints"
 }

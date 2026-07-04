@@ -1,4 +1,4 @@
-# Financial Command Center
+# Gravity
 
 A static personal finance portal with three views, seeded from `My Finances.xlsx`.
 
