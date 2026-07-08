@@ -1,6 +1,6 @@
 # Gravity
 
-A static personal finance portal with three views, seeded from `My Finances.xlsx`.
+A static personal finance portal with four views: Debt, Cashflow, Investment, and Taxation management.
 
 - **Debt Management**: debt list, payoff simulator (snowball/avalanche), PDF loan statement upload with AI extraction.
 - **Cashflow Management**: monthly income/expense logging, 50/20/30-style budget rule vs actual, recurring expense templates, net cashflow trend, an Accounts dashboard (bank logo badge, account name/number/type/balance, auto-detected from statements), and bank/card statement PDF upload that extracts transactions and merges them into a month's log. Categorization **learns from your corrections**: every category (and debit/credit type) you confirm or fix during review is remembered by a normalized merchant key, so the next statement auto-suggests it instead of falling back to a generic default. Recurring templates and individual transactions can be **linked to a specific debt** (e.g. "HDFC EMI" → the HDFC Loan record); linked bank-detected payments then flow into Debt Management's payment history, and "This Month's Known EMI Outflows" shows the expected amount, the last actual payment detected, and a Paid/Not-detected/Amount-mismatch status per debt — reconciling bank statements against loan statements automatically.
@@ -9,7 +9,7 @@ A static personal finance portal with three views, seeded from `My Finances.xlsx
 - A **Net Worth** strip (Investments + Cash − Pending Debt − Credit Card Dues) is always visible in the header across all views.
 
 - **Frontend**: plain HTML/CSS/JS, no build step, no framework. Charts via Chart.js (CDN). PDF text extraction via PDF.js (CDN).
-- **Data**: seeded once from `data-seed.js` into `localStorage` (single object: `{ debts, cashflow, investments }`); edit/add/delete in the app from then on. Use Export/Import to back up or move data between browsers/devices.
+- **Data**: starts empty and lives in `localStorage` (single object: `{ debts, cashflow, investments, taxation }`); populate it by adding records in the app or uploading statement PDFs. Use Export/Import to back up or move data between browsers/devices.
 - **Simulator**: snowball vs avalanche payoff simulation, runs entirely client-side.
 - **AI features** (`/api/ai-commentary.js`, `/api/parse-statement.js`, `/api/cashflow-insights.js`, `/api/investment-insights.js`, `/api/parse-investment-statement.js`, `/api/parse-bank-statement.js`, `/api/parse-tax-return.js`): Vercel serverless functions that call the **Google Gemini API** (free tier, no credit card needed). Requires a `GEMINI_API_KEY` environment variable set in the Vercel project — never commit the key.
 
@@ -39,6 +39,4 @@ No build step needed — just open `index.html` in a browser. The AI buttons won
 
 ## Notes on the data
 
-- **Debts**: only "Home Loan - Residence" was still active (₹33,21,000 pending) when imported; the other 27 debts were already fully paid off. Interest rates weren't in the source spreadsheet, so they default to 0% — fill them in per-debt (via Edit) for a true avalanche ordering; otherwise avalanche and snowball produce the same order.
-- **Investments**: seeded from the Investments sheet (11 holdings, ELSS funds + LIC + Life Insurance + EPF). The sheet had no market-value column, so Current Value defaults to Invested Amount on import — update it per-holding as you check actual NAV/statements.
-- **Cashflow**: the Monthly sheet had no years and inconsistent categories month to month, so historical months weren't auto-imported. Instead, the 50/20/30 sheet's budget split and common recurring expenses (HDFC EMI, Home, LIC, etc.) were seeded as quick-add templates — log real months going forward via "+ Log a Month".
+The app ships with no pre-seeded data — every browser starts with empty views and a default 50/20/30 budget split. Browsers that already have data in `localStorage` keep it (seeds only apply on first load or after clearing site data). Interest rates default to 0% on debts — fill them in per-debt (via Edit) for a true avalanche ordering; otherwise avalanche and snowball produce the same order.
