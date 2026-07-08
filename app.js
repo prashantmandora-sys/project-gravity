@@ -1,12 +1,12 @@
 const STORAGE_KEY = "debtPortalData";
 const INR = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
 
-let debts, cashflow, investments;
+let debts, cashflow, investments, taxation;
 loadData();
 
 let currentFilter = "all";
 let lastSimulation = null;
-let paidPendingChart, byDebtChart, simChart, budgetVsActualChart, cashflowTrendChart, allocationChart, investedVsCurrentChart;
+let paidPendingChart, byDebtChart, simChart, budgetVsActualChart, cashflowTrendChart, allocationChart, investedVsCurrentChart, taxYoyChart;
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -22,17 +22,19 @@ function loadData() {
       debts: JSON.parse(JSON.stringify(DEBT_SEED)),
       cashflow: JSON.parse(JSON.stringify(CASHFLOW_SEED)),
       investments: JSON.parse(JSON.stringify(INVESTMENT_SEED)),
+      taxation: JSON.parse(JSON.stringify(TAXATION_SEED)),
     };
   } else {
     const data = JSON.parse(raw);
     if (Array.isArray(data)) {
       // Migrating from the pre-multi-view schema, where the root was just the debts array.
-      parsed = { debts: data, cashflow: JSON.parse(JSON.stringify(CASHFLOW_SEED)), investments: JSON.parse(JSON.stringify(INVESTMENT_SEED)) };
+      parsed = { debts: data, cashflow: JSON.parse(JSON.stringify(CASHFLOW_SEED)), investments: JSON.parse(JSON.stringify(INVESTMENT_SEED)), taxation: JSON.parse(JSON.stringify(TAXATION_SEED)) };
     } else {
       parsed = {
         debts: data.debts || [],
         cashflow: data.cashflow || JSON.parse(JSON.stringify(CASHFLOW_SEED)),
         investments: data.investments || JSON.parse(JSON.stringify(INVESTMENT_SEED)),
+        taxation: data.taxation || JSON.parse(JSON.stringify(TAXATION_SEED)),
       };
     }
   }
@@ -50,15 +52,17 @@ function loadData() {
   if (!parsed.cashflow.categoryMappings || typeof parsed.cashflow.categoryMappings !== "object") parsed.cashflow.categoryMappings = {};
   if (!Array.isArray(parsed.cashflow.bankAccounts)) parsed.cashflow.bankAccounts = [];
   parsed.investments = parsed.investments.map(normalizeInvestment);
+  if (!Array.isArray(parsed.taxation.returns)) parsed.taxation.returns = [];
 
   debts = parsed.debts;
   cashflow = parsed.cashflow;
   investments = parsed.investments;
+  taxation = parsed.taxation;
   saveData();
 }
 
 function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ debts, cashflow, investments }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ debts, cashflow, investments, taxation }));
 }
 
 function recalc(d) {
@@ -84,6 +88,7 @@ function renderAll() {
   renderDebtView();
   renderCashflowView();
   renderInvestmentView();
+  renderTaxationView();
 }
 
 function renderNetWorth() {
@@ -1491,6 +1496,169 @@ function closeInvestmentModal() {
 }
 
 // ================================================================
+// TAXATION VIEW
+// ================================================================
+
+function renderTaxationView() {
+  const returns = [...taxation.returns].sort((a, b) => (a.assessmentYear || "").localeCompare(b.assessmentYear || ""));
+  const latest = returns[returns.length - 1];
+
+  document.getElementById("taxationSummaryGrid").innerHTML = [
+    ["Returns Filed", returns.length],
+    ["Latest AY", latest ? latest.assessmentYear : "-"],
+    ["Latest Gross Income", latest ? INR(latest.grossTotalIncome || 0) : "-"],
+    ["Latest Tax Paid", latest ? INR(latest.totalTaxPaid || 0) : "-"],
+    ["Total Tax Paid (all years)", INR(returns.reduce((s, r) => s + (r.totalTaxPaid || 0), 0))],
+    ["Total Refunds Received", INR(returns.reduce((s, r) => s + (r.refundAmount || 0), 0))],
+  ].map(([label, value]) => `<div class="summary-card"><div class="label">${label}</div><div class="value">${value}</div></div>`).join("");
+
+  const statusLabels = { filed: "Filed", processed: "Processed", "refund-issued": "Refund Issued" };
+  document.getElementById("taxReturnsTableBody").innerHTML =
+    [...returns]
+      .reverse()
+      .map(
+        (r) => `<tr data-id="${r.id}">
+          <td>${escapeHtml(r.assessmentYear || "-")}</td>
+          <td>${escapeHtml(r.itrForm || "-")}</td>
+          <td>${r.regime === "old" ? "Old" : r.regime === "new" ? "New" : "-"}</td>
+          <td>${INR(r.grossTotalIncome || 0)}</td>
+          <td>${INR(r.totalDeductions || 0)}</td>
+          <td>${INR(r.taxableIncome || 0)}</td>
+          <td>${INR(r.totalTaxPaid || 0)}</td>
+          <td>${r.refundAmount ? INR(r.refundAmount) : (r.taxDuePaid ? `<span class="negative">${INR(r.taxDuePaid)} due paid</span>` : "-")}</td>
+          <td>${statusLabels[r.status] || escapeHtml(r.status || "-")}</td>
+          <td>${r.filingDate || "-"}</td>
+          <td><button class="row-edit tax-return-edit" data-id="${r.id}">Edit</button>
+              <button class="row-edit tax-return-delete" data-id="${r.id}">Delete</button></td>
+        </tr>`
+      )
+      .join("") || `<tr><td colspan="11">No returns yet — upload a filed ITR PDF above.</td></tr>`;
+
+  renderTaxYoyChart(returns);
+}
+
+function renderTaxYoyChart(returns) {
+  const ctx = document.getElementById("chartTaxYoy");
+  if (taxYoyChart) taxYoyChart.destroy();
+  taxYoyChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: returns.map((r) => "AY " + (r.assessmentYear || "?")),
+      datasets: [
+        { label: "Gross Income", data: returns.map((r) => r.grossTotalIncome || 0), backgroundColor: "#4f8cff" },
+        { label: "Taxable Income", data: returns.map((r) => r.taxableIncome || 0), backgroundColor: "#a855f7" },
+        { label: "Tax Paid", data: returns.map((r) => r.totalTaxPaid || 0), backgroundColor: "#f59e0b" },
+        { label: "Refund", data: returns.map((r) => r.refundAmount || 0), backgroundColor: "#22c55e" },
+      ],
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#e7ebf3" } } },
+      scales: {
+        x: { ticks: { color: "#8a93a6" }, grid: { display: false } },
+        y: { ticks: { color: "#8a93a6" }, grid: { color: "#262e42" } },
+      },
+    },
+  });
+}
+
+// ---------- ITR Upload ----------
+
+function openTaxReturnReview(ret) {
+  document.getElementById("trId").value = ret ? ret.id : "";
+  document.getElementById("trAY").value = ret ? ret.assessmentYear || "" : "";
+  document.getElementById("trForm").value = ret ? ret.itrForm || "" : "";
+  document.getElementById("trFilingDate").value = ret ? ret.filingDate || "" : "";
+  document.getElementById("trRegime").value = ret ? ret.regime || "" : "";
+  document.getElementById("trGross").value = ret ? ret.grossTotalIncome ?? "" : "";
+  document.getElementById("trDeductions").value = ret ? ret.totalDeductions ?? "" : "";
+  document.getElementById("trTaxable").value = ret ? ret.taxableIncome ?? "" : "";
+  document.getElementById("trTaxPaid").value = ret ? ret.totalTaxPaid ?? "" : "";
+  document.getElementById("trTds").value = ret ? ret.tdsAmount ?? "" : "";
+  document.getElementById("trRefund").value = ret ? ret.refundAmount ?? 0 : 0;
+  document.getElementById("trTaxDue").value = ret ? ret.taxDuePaid ?? 0 : 0;
+  document.getElementById("trAck").value = ret ? ret.acknowledgmentNumber || "" : "";
+  document.getElementById("trStatus").value = ret ? ret.status || "filed" : "filed";
+  document.getElementById("taxReturnReview").hidden = false;
+}
+
+async function handleTaxReturnFile(file) {
+  const statusEl = document.getElementById("taxReturnStatus");
+  statusEl.hidden = false;
+  statusEl.textContent = "Extracting text from PDF...";
+  document.getElementById("taxReturnReview").hidden = true;
+
+  try {
+    const text = await extractPdfText(file);
+    statusEl.textContent = "Asking AI to read the return details...";
+
+    const res = await fetch("/api/parse-tax-return", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text.slice(0, 20000) }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Parsing failed");
+
+    const f = data.fields || {};
+    openTaxReturnReview({
+      id: "",
+      assessmentYear: f.assessmentYear || "",
+      itrForm: f.itrForm || "",
+      filingDate: f.filingDate || "",
+      regime: f.regime || "",
+      grossTotalIncome: f.grossTotalIncome,
+      totalDeductions: f.totalDeductions,
+      taxableIncome: f.taxableIncome,
+      totalTaxPaid: f.totalTaxPaid,
+      tdsAmount: f.tdsAmount,
+      refundAmount: f.refundAmount || 0,
+      taxDuePaid: f.taxDue || 0,
+      acknowledgmentNumber: f.acknowledgmentNumber || "",
+      status: "filed",
+    });
+
+    statusEl.hidden = true;
+  } catch (err) {
+    statusEl.hidden = false;
+    statusEl.textContent = "Couldn't read this return: " + err.message +
+      " (requires the /api/parse-tax-return serverless function deployed with GEMINI_API_KEY set).";
+  }
+}
+
+function saveTaxReturnReview() {
+  const id = document.getElementById("trId").value;
+  const num = (elId) => (document.getElementById(elId).value === "" ? null : Number(document.getElementById(elId).value));
+  const payload = {
+    assessmentYear: document.getElementById("trAY").value.trim(),
+    itrForm: document.getElementById("trForm").value.trim(),
+    filingDate: document.getElementById("trFilingDate").value,
+    regime: document.getElementById("trRegime").value,
+    grossTotalIncome: num("trGross"),
+    totalDeductions: num("trDeductions"),
+    taxableIncome: num("trTaxable"),
+    totalTaxPaid: num("trTaxPaid"),
+    tdsAmount: num("trTds"),
+    refundAmount: Number(document.getElementById("trRefund").value) || 0,
+    taxDuePaid: Number(document.getElementById("trTaxDue").value) || 0,
+    acknowledgmentNumber: document.getElementById("trAck").value.trim(),
+    status: document.getElementById("trStatus").value,
+  };
+
+  if (id) {
+    Object.assign(taxation.returns.find((r) => r.id === id), payload);
+  } else {
+    // One row per AY — a re-upload for the same year replaces the earlier entry.
+    taxation.returns = taxation.returns.filter((r) => r.assessmentYear !== payload.assessmentYear);
+    taxation.returns.push({ id: "itr-" + Date.now(), uploadedAt: new Date().toISOString(), ...payload });
+  }
+
+  saveData();
+  document.getElementById("taxReturnReview").hidden = true;
+  document.getElementById("taxReturnFile").value = "";
+  renderTaxationView();
+}
+
+// ================================================================
 // EVENT BINDING
 // ================================================================
 
@@ -1500,7 +1668,7 @@ function bindEvents() {
   });
 
   document.getElementById("btnExport").addEventListener("click", () => {
-    const blob = new Blob([JSON.stringify({ debts, cashflow, investments }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ debts, cashflow, investments, taxation }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1521,6 +1689,7 @@ function bindEvents() {
         if (Array.isArray(parsed.debts)) debts = parsed.debts.map(recalc);
         if (parsed.cashflow) cashflow = parsed.cashflow;
         if (Array.isArray(parsed.investments)) investments = parsed.investments;
+        if (parsed.taxation && Array.isArray(parsed.taxation.returns)) taxation = parsed.taxation;
       }
       saveData();
       renderAll();
@@ -1769,6 +1938,39 @@ function bindEvents() {
   document.getElementById("taxRegimeSelect").addEventListener("change", (e) => {
     taxSelectedRegime = e.target.value;
     renderTaxBenefitPanel();
+  });
+
+  // ---- Taxation view events ----
+  document.getElementById("btnAddTaxReturn").addEventListener("click", () => openTaxReturnReview(null));
+
+  document.getElementById("taxReturnFile").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) handleTaxReturnFile(file);
+  });
+
+  document.getElementById("taxReturnForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    saveTaxReturnReview();
+  });
+
+  document.getElementById("btnCancelTaxReturn").addEventListener("click", () => {
+    document.getElementById("taxReturnReview").hidden = true;
+    document.getElementById("taxReturnFile").value = "";
+  });
+
+  document.getElementById("taxReturnsTableBody").addEventListener("click", (e) => {
+    const editBtn = e.target.closest(".tax-return-edit");
+    if (editBtn) {
+      const ret = taxation.returns.find((r) => r.id === editBtn.dataset.id);
+      if (ret) openTaxReturnReview(ret);
+      return;
+    }
+    const delBtn = e.target.closest(".tax-return-delete");
+    if (delBtn) {
+      taxation.returns = taxation.returns.filter((r) => r.id !== delBtn.dataset.id);
+      saveData();
+      renderTaxationView();
+    }
   });
 }
 

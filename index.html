@@ -22,6 +22,7 @@
   <button class="tab-btn active" data-view="debt">Debt Management</button>
   <button class="tab-btn" data-view="cashflow">Cashflow Management</button>
   <button class="tab-btn" data-view="investment">Investment Management</button>
+  <button class="tab-btn" data-view="taxation">Taxation</button>
 </nav>
 
 <main>
@@ -361,6 +362,81 @@
           <tbody id="taxBenefitTableBody"></tbody>
         </table>
       </div>
+    </section>
+  </section>
+
+  <!-- ===================== TAXATION VIEW ===================== -->
+  <section class="view" id="view-taxation" hidden>
+    <div class="view-header">
+      <h2>Taxation</h2>
+      <button id="btnAddTaxReturn" class="btn primary">+ Add Return Manually</button>
+    </div>
+
+    <section class="summary-grid" id="taxationSummaryGrid"></section>
+
+    <section class="panel">
+      <h2>Filed Return (ITR) Upload</h2>
+      <p class="hint">Upload a filed ITR PDF (ITR-V acknowledgment, ITR form, or intimation u/s 143(1)). Text is
+        extracted in your browser, then AI reads out the assessment year, income, deductions, tax paid and
+        refund so it can be logged into your year-on-year history.</p>
+      <div class="simulator-controls">
+        <label class="btn file-btn">Upload ITR PDF<input type="file" id="taxReturnFile" accept="application/pdf" hidden /></label>
+      </div>
+      <div id="taxReturnStatus" class="hint" hidden></div>
+
+      <div id="taxReturnReview" class="statement-review" hidden>
+        <h3>Extracted details &mdash; review before saving</h3>
+        <form id="taxReturnForm">
+          <input type="hidden" id="trId" />
+          <label>Assessment Year <input required id="trAY" type="text" placeholder="e.g. 2025-26" /></label>
+          <label>ITR Form <input id="trForm" type="text" placeholder="ITR-1, ITR-2..." /></label>
+          <label>Filing Date <input id="trFilingDate" type="date" /></label>
+          <label>Tax Regime
+            <select id="trRegime">
+              <option value="">Unknown</option>
+              <option value="old">Old Regime</option>
+              <option value="new">New Regime</option>
+            </select>
+          </label>
+          <label>Gross Total Income (&#8377;) <input id="trGross" type="number" step="1" /></label>
+          <label>Total Deductions (&#8377;) <input id="trDeductions" type="number" step="1" /></label>
+          <label>Taxable Income (&#8377;) <input id="trTaxable" type="number" step="1" /></label>
+          <label>Total Tax Paid (TDS + self-assessment) (&#8377;) <input id="trTaxPaid" type="number" step="1" /></label>
+          <label>TDS (&#8377;) <input id="trTds" type="number" step="1" /></label>
+          <label>Refund Received (&#8377;, 0 if none) <input id="trRefund" type="number" step="1" /></label>
+          <label>Additional Tax Due Paid (&#8377;, 0 if none) <input id="trTaxDue" type="number" step="1" /></label>
+          <label>Acknowledgment Number <input id="trAck" type="text" /></label>
+          <label>Status
+            <select id="trStatus">
+              <option value="filed">Filed</option>
+              <option value="processed">Processed</option>
+              <option value="refund-issued">Refund Issued</option>
+            </select>
+          </label>
+          <div class="modal-actions">
+            <button type="button" id="btnCancelTaxReturn" class="btn">Discard</button>
+            <button type="submit" class="btn primary">Save Return</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Year-on-Year Filed Returns</h2>
+      <div class="table-wrap">
+        <table id="taxReturnsTable">
+          <thead>
+            <tr><th>AY</th><th>Form</th><th>Regime</th><th>Gross Income</th><th>Deductions</th><th>Taxable Income</th>
+              <th>Tax Paid</th><th>Refund</th><th>Status</th><th>Filed On</th><th></th></tr>
+          </thead>
+          <tbody id="taxReturnsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Income &amp; Tax Trend</h2>
+      <canvas id="chartTaxYoy" height="240"></canvas>
     </section>
   </section>
 </main>

@@ -87,3 +87,9 @@ const CASHFLOW_SEED = {
   categoryMappings: {},
   bankAccounts: [],
 };
+
+// Filed ITR history. The xlsx "Taxation" sheet tracked monthly salary credits/TDS, not filed
+// returns, so this starts empty — populate by uploading filed ITR PDFs in the Taxation view.
+const TAXATION_SEED = {
+  returns: [],
+};
