@@ -56,7 +56,13 @@ ${text}
         headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json" },
+          generationConfig: {
+            responseMimeType: "application/json",
+            // Extraction needs no reasoning; without this, 2.5-flash "thinking" tokens can eat
+            // the output budget on long statements and truncate the JSON mid-array.
+            maxOutputTokens: 65536,
+            thinkingConfig: { thinkingBudget: 0 },
+          },
         }),
       }
     );
@@ -74,8 +80,20 @@ ${text}
     try {
       fields = JSON.parse(raw);
     } catch {
-      res.status(502).json({ error: "AI response wasn't valid JSON", raw });
-      return;
+      // Salvage a response truncated mid-transactions-array: cut back to the last complete
+      // transaction object and close the array + root object.
+      const lastComplete = raw.lastIndexOf("},");
+      if (lastComplete !== -1) {
+        try {
+          fields = JSON.parse(raw.slice(0, lastComplete + 1) + "]}");
+        } catch {
+          fields = null;
+        }
+      }
+      if (!fields) {
+        res.status(502).json({ error: "AI response wasn't valid JSON", raw: raw.slice(0, 2000) });
+        return;
+      }
     }
 
     res.status(200).json({ fields });
